@@ -56,6 +56,19 @@ const THAI_FUND_ALIASES = {
   'K-GINFRA-A': 'K-GINFRA-A(D)',
 };
 
+// Known fund code -> Morningstar security ID (skips the Finnomena lookup,
+// which is blocked from some datacenter IPs)
+const THAI_FUND_MS_IDS = {
+  'K-GINFRA-A': 'F00000X1H9',
+  'KF-ACHINA-A': 'F0000107C7',
+  'KFGPROP-A': 'F0000149I8',
+  'KFHHCARE-A': 'F0000125CM',
+  'KFINDIA-A': 'F00000ZIKF',
+  'KFVIET-A': 'F000010F4S',
+  'SCBNK225': 'F00000QJNM',
+  'SCBWLD': 'F00001D493',
+};
+
 let thaiFundIndex = null;       // normalized short_code -> { id, short_code }
 let thaiFundIndexFetchedAt = 0;
 const FUND_INDEX_TTL = 24 * 60 * 60 * 1000; // refresh fund list daily
@@ -91,7 +104,10 @@ async function getThaiFundIndex() {
 }
 
 async function resolveThaiFundId(fundCode) {
-  const aliased = THAI_FUND_ALIASES[fundCode.toUpperCase()] || fundCode;
+  const upper = fundCode.toUpperCase();
+  if (THAI_FUND_MS_IDS[upper]) return THAI_FUND_MS_IDS[upper];
+
+  const aliased = THAI_FUND_ALIASES[upper] || fundCode;
   const index = await getThaiFundIndex();
   const norm = normalizeFundCode(aliased);
   if (index[norm]) return index[norm].id;
@@ -105,16 +121,21 @@ async function fetchThaiMutualFundNAV(fundCode) {
   const msId = await resolveThaiFundId(fundCode);
   if (!msId) throw new Error(`Fund code not found in Thai fund registry: ${fundCode}. Use manual price override.`);
 
-  const url = `https://www.morningstar.com/api/v2/stores/realtime/quotes?securities=${msId}`;
+  // Morningstar legacy timeseries endpoint — no auth, returns daily NAV history
+  const startDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const url = `https://tools.morningstar.it/api/rest.svc/timeseries_price/jbyiq3rhyf?currencyId=THB&idtype=Morningstar&frequency=daily&outputType=JSON&startDate=${startDate}&id=${msId}]2]0]FOTHA$$ALL`;
   const response = await axios.get(url, {
-    headers: { ...BROWSER_HEADERS, Referer: 'https://www.morningstar.com/funds' },
-    timeout: 10000,
+    headers: { ...BROWSER_HEADERS },
+    timeout: 15000,
   });
-  const quote = response.data?.[msId];
-  const price = quote?.lastPrice?.value ?? quote?.previousClosePrice?.value;
-  const currency = quote?.listedCurrency?.value || 'THB';
+  const history = response.data?.TimeSeries?.Security?.[0]?.HistoryDetail;
+  if (!Array.isArray(history) || history.length === 0) {
+    throw new Error(`NAV unavailable for ${fundCode} (${msId})`);
+  }
+  const latest = history[history.length - 1];
+  const price = parseFloat(latest.Value);
   if (!price || isNaN(price)) throw new Error(`NAV unavailable for ${fundCode} (${msId})`);
-  return { price: parseFloat(price), currency, source: 'morningstar' };
+  return { price, currency: 'THB', source: 'morningstar', navDate: latest.EndDate };
 }
 
 async function fetchLivePrice(ticker, exchange) {
