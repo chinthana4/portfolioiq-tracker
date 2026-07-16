@@ -34,6 +34,20 @@ async function fetchFromYahoo(ticker, exchange) {
   return { price, currency, source: 'yahoo' };
 }
 
+async function fetchFromFinnhub(ticker, exchange) {
+  const apiKey = process.env.FINNHUB_API_KEY;
+  if (!apiKey) throw new Error('FINNHUB_API_KEY not set');
+  const symbol = buildYahooTicker(ticker, exchange); // same suffix mapping works for Finnhub
+  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`;
+  const response = await axios.get(url, { timeout: 8000 });
+  const { c: price, pc } = response.data; // c = current price, pc = previous close
+  if (!price || price === 0) throw new Error('Finnhub returned no price');
+  // Finnhub doesn't return currency — derive from exchange
+  const THB_EXCHANGES = ['SET', 'MAI'];
+  const currency = THB_EXCHANGES.includes(exchange?.toUpperCase()) ? 'THB' : 'USD';
+  return { price, currency, source: 'finnhub' };
+}
+
 // Fetch Thai mutual fund NAV from SEC Thailand public API
 async function fetchThaiMutualFundNAV(fundCode) {
   // Try SEC Thailand API
@@ -84,7 +98,13 @@ async function fetchLivePrice(ticker, exchange) {
     if (THAI_MF_EXCHANGES.includes(exchange?.toUpperCase())) {
       data = await fetchThaiMutualFundNAV(ticker);
     } else {
-      data = await fetchFromYahoo(ticker, exchange);
+      // Try Yahoo Finance first; fall back to Finnhub if Yahoo fails
+      try {
+        data = await fetchFromYahoo(ticker, exchange);
+      } catch (yahooErr) {
+        console.warn(`[price] Yahoo failed for ${ticker} (${exchange}): ${yahooErr.message} — trying Finnhub`);
+        data = await fetchFromFinnhub(ticker, exchange);
+      }
     }
 
     cache.set(cacheKey, data);
