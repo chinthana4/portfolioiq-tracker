@@ -55,6 +55,11 @@ async function initSchema() {
       ALTER TABLE transactions ADD COLUMN IF NOT EXISTS asset_type TEXT NOT NULL DEFAULT 'Stock' CHECK(asset_type IN ('Stock','ETF','Mutual Fund','Bond'));
       ALTER TABLE transactions ADD COLUMN IF NOT EXISTS fund_house TEXT;
 
+      -- Fix existing Thai mutual fund records that were saved with wrong currency default
+      UPDATE transactions SET currency = 'THB' WHERE exchange IN ('TH-MF', 'AIMC') AND (currency IS NULL OR currency = 'GBP' OR currency = 'USD');
+      -- Fix existing SET/MAI (Thai stock) records
+      UPDATE transactions SET currency = 'THB' WHERE exchange IN ('SET', 'MAI') AND (currency IS NULL OR currency = 'GBP');
+
       CREATE TABLE IF NOT EXISTS live_prices (
         id SERIAL PRIMARY KEY,
         ticker TEXT NOT NULL,
