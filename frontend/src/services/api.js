@@ -41,6 +41,8 @@ export const transactions = {
 export const prices = {
   live:    (ticker, exchange) => api.get('/prices/live', { params: { ticker, exchange } }),
   refresh: ()                 => api.post('/prices/refresh'),
+  thaiMF:  ()                 => api.get('/prices/thai-mf'),
+  bulkNav: updates            => api.post('/prices/bulk-nav', { updates }),
 };
 
 export default api;

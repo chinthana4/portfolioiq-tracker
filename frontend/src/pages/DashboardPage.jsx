@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { transactions as txApi } from '../services/api';
+import { transactions as txApi, prices as priceApi } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import KPICard from '../components/KPICard';
 import RiskBadge from '../components/RiskBadge';
@@ -24,11 +24,95 @@ function fmtPct(n) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+function NavUpdateModal({ onClose, onSaved }) {
+  const [funds, setFunds] = useState([]);
+  const [navInputs, setNavInputs] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+
+  React.useEffect(() => {
+    priceApi.thaiMF().then(rows => {
+      setFunds(rows);
+      const init = {};
+      rows.forEach(r => { init[r.ticker] = r.current_nav ? String(parseFloat(r.current_nav).toFixed(4)) : ''; });
+      setNavInputs(init);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    const updates = funds.map(f => ({
+      ticker: f.ticker, exchange: f.exchange, currency: f.currency || 'THB',
+      price: parseFloat(navInputs[f.ticker]),
+    })).filter(u => u.price > 0 && !isNaN(u.price));
+    try {
+      const res = await priceApi.bulkNav(updates);
+      setSavedMsg(`Updated ${res.updated} fund NAVs`);
+      setTimeout(() => { onSaved(); onClose(); }, 1200);
+    } catch { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 520 }}>
+        <h2 style={{ marginBottom: 4 }}>Update Thai Mutual Fund NAV</h2>
+        <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 16 }}>
+          Enter today's NAV (฿ per unit) for each fund. Find latest NAV at{' '}
+          <a href="https://www.kasikornasset.com/en/mutual-fund/pages/fund-nav.aspx" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>kasikornasset.com</a> or{' '}
+          <a href="https://www.scbam.com/en/fund-price" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>scbam.com</a>.
+        </p>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 24 }}><div className="spinner" /></div>
+        ) : funds.length === 0 ? (
+          <div style={{ color: 'var(--text2)', textAlign: 'center', padding: 24 }}>No Thai mutual funds found in your portfolio.</div>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>Fund Code</th><th>Fund Name</th><th>Last NAV (฿)</th><th>New NAV (฿)</th></tr>
+            </thead>
+            <tbody>
+              {funds.map(f => (
+                <tr key={f.ticker}>
+                  <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{f.ticker}</td>
+                  <td style={{ fontSize: 12, maxWidth: 160 }}>{f.share_name}</td>
+                  <td style={{ color: 'var(--text2)', fontSize: 12 }}>
+                    {f.current_nav ? `฿${parseFloat(f.current_nav).toFixed(4)}` : '—'}
+                    {f.nav_updated_at && <span style={{ display: 'block', fontSize: 10, color: 'var(--text2)' }}>{new Date(f.nav_updated_at).toLocaleDateString('en-GB')}</span>}
+                  </td>
+                  <td>
+                    <input
+                      type="number" step="0.0001" min="0"
+                      style={{ width: 100 }}
+                      placeholder="0.0000"
+                      value={navInputs[f.ticker] || ''}
+                      onChange={e => setNavInputs(n => ({ ...n, [f.ticker]: e.target.value }))}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {savedMsg && <div style={{ color: 'var(--green)', marginTop: 12, fontSize: 13 }}>{savedMsg}</div>}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" onClick={save} disabled={saving || loading || funds.length === 0}>
+            {saving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Save NAVs'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState('');
+  const [showNavModal, setShowNavModal] = useState(false);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -66,16 +150,23 @@ export default function DashboardPage() {
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>Dashboard</h1>
           <p style={{ color: 'var(--text2)', fontSize: 13, marginTop: 2 }}>Live portfolio overview</p>
         </div>
-        {lastUpdated && (
-          <div style={{ fontSize: 11, color: 'var(--text2)', textAlign: 'right', lineHeight: 1.6 }}>
-            <div>
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', marginRight: 5, verticalAlign: 'middle' }} />
-              Auto-refresh · next in {secondsLeft}s
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => setShowNavModal(true)}>
+            ฿ Update Thai NAV
+          </button>
+          {lastUpdated && (
+            <div style={{ fontSize: 11, color: 'var(--text2)', textAlign: 'right', lineHeight: 1.6 }}>
+              <div>
+                <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', marginRight: 5, verticalAlign: 'middle' }} />
+                Auto-refresh · next in {secondsLeft}s
+              </div>
+              <div>Last updated: {lastUpdated.toLocaleTimeString()}</div>
             </div>
-            <div>Last updated: {lastUpdated.toLocaleTimeString()}</div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      {showNavModal && <NavUpdateModal onClose={() => setShowNavModal(false)} onSaved={fetchSummary} />}
 
       {!summary || summary.transaction_count === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text2)' }}>
