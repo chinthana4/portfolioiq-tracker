@@ -132,16 +132,24 @@ export default function DashboardPage() {
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}><div className="spinner" /></div>;
   if (error) return <div style={{ color: 'var(--red)', padding: 20 }}>{error}</div>;
 
-  const pnlType = !summary ? 'neutral' : summary.total_pnl >= 0 ? 'positive' : 'negative';
   const roiType = !summary ? 'neutral' : summary.overall_roi >= 0 ? 'positive' : 'negative';
 
-  // Dominant currency for KPI totals
-  const dominantCurrency = (() => {
-    if (!summary?.by_share?.length) return 'USD';
-    const counts = {};
-    summary.by_share.forEach(s => { counts[s.currency] = (counts[s.currency] || 0) + 1; });
-    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  // Group totals by currency so mixed portfolios show correct symbols
+  const byCurrency = (() => {
+    if (!summary?.by_share?.length) return {};
+    const map = {};
+    for (const s of summary.by_share) {
+      const c = s.currency || 'USD';
+      if (!map[c]) map[c] = { invested: 0, value: 0, pnl: 0 };
+      map[c].invested += s.cost_basis;
+      map[c].value    += s.current_value;
+      map[c].pnl      += s.pnl;
+    }
+    return map;
   })();
+  const currencies = Object.keys(byCurrency);
+  // dominant for charts (most value)
+  const dominantCurrency = currencies.sort((a, b) => byCurrency[b].value - byCurrency[a].value)[0] || 'USD';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -176,14 +184,20 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* KPI Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
-            <KPICard label="Total Invested"  value={summary.total_invested}    prefix={sym(dominantCurrency)} />
-            <KPICard label="Current Value"   value={summary.total_value}       prefix={sym(dominantCurrency)} />
-            <KPICard label="Total P&L"       value={summary.total_pnl}         prefix={sym(dominantCurrency)} type={pnlType} />
-            <KPICard label="Overall ROI"     value={summary.overall_roi}       prefix="" suffix="%" type={roiType} />
-            <KPICard label="Positions"       value={summary.transaction_count} prefix="" sub="individual lots" />
-          </div>
+          {/* KPI Cards — one row per currency so ฿ and $ never mix */}
+          {currencies.map(c => {
+            const g = byCurrency[c];
+            const pnlT = g.pnl >= 0 ? 'positive' : 'negative';
+            return (
+              <div key={c} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+                <KPICard label={`Invested (${c})`}      value={g.invested} prefix={sym(c)} />
+                <KPICard label={`Current Value (${c})`} value={g.value}    prefix={sym(c)} />
+                <KPICard label={`P&L (${c})`}           value={g.pnl}      prefix={sym(c)} type={pnlT} />
+                <KPICard label="Overall ROI"            value={summary.overall_roi} prefix="" suffix="%" type={roiType} />
+                <KPICard label="Positions"              value={summary.transaction_count} prefix="" sub="individual lots" />
+              </div>
+            );
+          })}
 
           {/* Charts */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>

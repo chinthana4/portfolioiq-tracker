@@ -184,18 +184,20 @@ export default function TransactionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {txs.map(tx => (
+                {txs.map(tx => {
+                  const cs = currSym(tx.currency || 'USD');
+                  return (
                   <tr key={tx.id}>
                     <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{tx.ticker}</td>
                     <td>{tx.share_name}</td>
                     <td style={{ color: 'var(--text2)' }}>{tx.platform_name}</td>
                     <td style={{ color: 'var(--text2)' }}>{new Date(tx.purchase_date).toLocaleDateString('en-GB')}</td>
-                    <td>{fmt(tx.purchase_price)}</td>
+                    <td>{fmt(tx.purchase_price, cs)}</td>
                     <td>{tx.units}</td>
-                    <td>{fmt(tx.cost_basis)}</td>
-                    <td>{fmt(tx.current_price)}</td>
-                    <td>{fmt(tx.current_value)}</td>
-                    <td className={tx.pnl >= 0 ? 'positive' : 'negative'}>{fmt(tx.pnl)}</td>
+                    <td>{fmt(tx.cost_basis, cs)}</td>
+                    <td>{fmt(tx.current_price, cs)}</td>
+                    <td>{fmt(tx.current_value, cs)}</td>
+                    <td className={tx.pnl >= 0 ? 'positive' : 'negative'}>{fmt(tx.pnl, cs)}</td>
                     <td className={tx.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.simple_roi)}</td>
                     <td className={tx.annualised_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.annualised_roi)}</td>
                     <td><RiskBadge level={tx.risk_level} /></td>
@@ -207,7 +209,8 @@ export default function TransactionsPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
