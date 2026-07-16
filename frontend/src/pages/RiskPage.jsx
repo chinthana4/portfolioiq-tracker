@@ -10,7 +10,7 @@ import KPICard from '../components/KPICard';
 const RISK_COLORS = { Low: '#4ade80', Medium: '#fbbf24', High: '#fb923c', 'Very High': '#f87171' };
 const RISK_ORDER = ['Low', 'Medium', 'High', 'Very High'];
 
-function fmt(n, p = '£') {
+function fmt(n, p = '$') {
   if (!n && n !== 0) return '—';
   return `${n < 0 ? '-' : ''}${p}${Math.abs(n).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
 }
@@ -82,7 +82,7 @@ export default function RiskPage() {
             <BarChart data={byRisk} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="risk_level" tick={{ fill: 'var(--text2)', fontSize: 11 }} />
-              <YAxis tick={{ fill: 'var(--text2)', fontSize: 11 }} tickFormatter={v => `£${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`} />
+              <YAxis tick={{ fill: 'var(--text2)', fontSize: 11 }} tickFormatter={v => `$${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`} />
               <Tooltip formatter={v => fmt(v)} contentStyle={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="cost_basis" name="Invested" fill="var(--primary)" opacity={0.7} radius={[4, 4, 0, 0]} />
@@ -100,7 +100,7 @@ export default function RiskPage() {
             <BarChart data={byRisk} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="risk_level" tick={{ fill: 'var(--text2)', fontSize: 11 }} />
-              <YAxis tick={{ fill: 'var(--text2)', fontSize: 11 }} tickFormatter={v => `£${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`} />
+              <YAxis tick={{ fill: 'var(--text2)', fontSize: 11 }} tickFormatter={v => `$${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`} />
               <Tooltip formatter={v => fmt(v)} contentStyle={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8 }} />
               <Bar dataKey="pnl" name="P&L" radius={[4, 4, 0, 0]}>
                 {byRisk.map(r => <Cell key={r.risk_level} fill={r.pnl >= 0 ? '#22c55e' : '#ef4444'} />)}

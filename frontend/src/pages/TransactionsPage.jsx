@@ -16,7 +16,7 @@ const EXCHANGES = [
   'NSE', 'BSE',
 ];
 
-function fmt(n, p = '£') {
+function fmt(n, p = '$') {
   if (n === undefined || n === null) return '—';
   return `${n < 0 ? '-' : ''}${p}${Math.abs(n).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
 }
