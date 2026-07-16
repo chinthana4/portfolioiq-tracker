@@ -48,44 +48,64 @@ async function fetchFromFinnhub(ticker, exchange) {
   return { price, currency, source: 'finnhub' };
 }
 
-// Fetch Thai mutual fund NAV from SEC Thailand public API
+// --- Thai mutual fund NAV: Finnomena fund list (code -> Morningstar ID) + Morningstar quote ---
+
+// Aliases for fund codes entered differently from Finnomena's listing
+const THAI_FUND_ALIASES = {
+  'SCBWLD': 'SCBWORLD(A)',
+  'K-GINFRA-A': 'K-GINFRA-A(D)',
+};
+
+let thaiFundIndex = null;       // normalized short_code -> { id, short_code }
+let thaiFundIndexFetchedAt = 0;
+const FUND_INDEX_TTL = 24 * 60 * 60 * 1000; // refresh fund list daily
+
+function normalizeFundCode(code) {
+  return String(code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+async function getThaiFundIndex() {
+  if (thaiFundIndex && Date.now() - thaiFundIndexFetchedAt < FUND_INDEX_TTL) return thaiFundIndex;
+  const response = await axios.get('https://www.finnomena.com/fn3/api/fund/public/list?page=1&size=20000', {
+    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    timeout: 30000,
+  });
+  const funds = response.data;
+  if (!Array.isArray(funds) || funds.length === 0) throw new Error('Finnomena fund list unavailable');
+  const index = {};
+  for (const f of funds) {
+    if (f.short_code && f.id) index[normalizeFundCode(f.short_code)] = { id: f.id, short_code: f.short_code };
+  }
+  thaiFundIndex = index;
+  thaiFundIndexFetchedAt = Date.now();
+  return index;
+}
+
+async function resolveThaiFundId(fundCode) {
+  const aliased = THAI_FUND_ALIASES[fundCode.toUpperCase()] || fundCode;
+  const index = await getThaiFundIndex();
+  const norm = normalizeFundCode(aliased);
+  if (index[norm]) return index[norm].id;
+  // prefix match: user entered "K-GINFRA-A", listing has "K-GINFRA-A(D)"
+  const prefixHit = Object.keys(index).find(k => k.startsWith(norm));
+  if (prefixHit) return index[prefixHit].id;
+  return null;
+}
+
 async function fetchThaiMutualFundNAV(fundCode) {
-  // Try SEC Thailand API
-  try {
-    const url = `https://api.sec.or.th/FundFactsheet/fund/nav?LangCode=E&FundName=${encodeURIComponent(fundCode)}`;
-    const response = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 10000,
-    });
-    const data = response.data;
-    if (Array.isArray(data) && data.length > 0) {
-      const latest = data[0];
-      const price = parseFloat(latest.nav || latest.NAV || latest.navPerUnit || latest.NAVPerUnit);
-      if (price && !isNaN(price)) {
-        return { price, currency: 'THB', source: 'sec-thailand', navDate: latest.navDate || latest.NAVDate };
-      }
-    }
-  } catch (e) {
-    // fall through to AIMC
-  }
+  const msId = await resolveThaiFundId(fundCode);
+  if (!msId) throw new Error(`Fund code not found in Thai fund registry: ${fundCode}. Use manual price override.`);
 
-  // Try AIMC (Thai Mutual Fund Association) as fallback
-  try {
-    const url = `https://www.thaimutualfund.com/overlay/FundDetailOverlay.aspx?id=${encodeURIComponent(fundCode)}`;
-    const response = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 10000,
-    });
-    // Parse NAV from HTML response
-    const match = response.data.match(/NAV[^0-9]*([0-9]+\.[0-9]+)/i);
-    if (match) {
-      return { price: parseFloat(match[1]), currency: 'THB', source: 'aimc' };
-    }
-  } catch (e) {
-    // fall through
-  }
-
-  throw new Error(`NAV not found for fund: ${fundCode}. Use manual price override.`);
+  const url = `https://www.morningstar.com/api/v2/stores/realtime/quotes?securities=${msId}`;
+  const response = await axios.get(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    timeout: 10000,
+  });
+  const quote = response.data?.[msId];
+  const price = quote?.lastPrice?.value ?? quote?.previousClosePrice?.value;
+  const currency = quote?.listedCurrency?.value || 'THB';
+  if (!price || isNaN(price)) throw new Error(`NAV unavailable for ${fundCode} (${msId})`);
+  return { price: parseFloat(price), currency, source: 'morningstar' };
 }
 
 async function fetchLivePrice(ticker, exchange) {
