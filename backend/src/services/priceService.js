@@ -64,10 +64,19 @@ function normalizeFundCode(code) {
   return String(code).toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9,th;q=0.8',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin',
+};
+
 async function getThaiFundIndex() {
   if (thaiFundIndex && Date.now() - thaiFundIndexFetchedAt < FUND_INDEX_TTL) return thaiFundIndex;
   const response = await axios.get('https://www.finnomena.com/fn3/api/fund/public/list?page=1&size=20000', {
-    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    headers: { ...BROWSER_HEADERS, Referer: 'https://www.finnomena.com/fund' },
     timeout: 30000,
   });
   const funds = response.data;
@@ -98,7 +107,7 @@ async function fetchThaiMutualFundNAV(fundCode) {
 
   const url = `https://www.morningstar.com/api/v2/stores/realtime/quotes?securities=${msId}`;
   const response = await axios.get(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    headers: { ...BROWSER_HEADERS, Referer: 'https://www.morningstar.com/funds' },
     timeout: 10000,
   });
   const quote = response.data?.[msId];
