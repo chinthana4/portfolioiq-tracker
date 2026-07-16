@@ -79,7 +79,7 @@ router.get('/summary', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { platform_id, share_name, ticker, exchange, purchase_date, purchase_price, units, risk_level, currency, notes, manual_price } = req.body;
+  const { platform_id, share_name, ticker, exchange, purchase_date, purchase_price, units, risk_level, currency, notes, manual_price, asset_type, fund_house } = req.body;
   if (!platform_id || !share_name || !ticker || !purchase_date || !purchase_price || !units || !risk_level) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -89,14 +89,17 @@ router.post('/', async (req, res) => {
   const pf = await pool.query('SELECT id FROM platforms WHERE id = $1 AND user_id = $2', [platform_id, req.user.id]);
   if (!pf.rows.length) return res.status(404).json({ error: 'Platform not found' });
 
+  const resolvedExchange = asset_type === 'Mutual Fund' && !exchange ? 'TH-MF' : (exchange || 'LSE');
+  const resolvedCurrency = currency || (resolvedExchange === 'TH-MF' ? 'THB' : 'USD');
+
   const result = await pool.query(`
     INSERT INTO transactions
-      (user_id, platform_id, share_name, ticker, exchange, purchase_date, purchase_price, units, risk_level, risk_score, currency, notes, manual_price)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      (user_id, platform_id, share_name, ticker, exchange, purchase_date, purchase_price, units, risk_level, risk_score, currency, notes, manual_price, asset_type, fund_house)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
     RETURNING id
-  `, [req.user.id, platform_id, share_name, ticker.toUpperCase(), exchange || 'LSE',
+  `, [req.user.id, platform_id, share_name, ticker.toUpperCase(), resolvedExchange,
       purchase_date, purchase_price, units, risk_level, RISK_SCORE[risk_level],
-      currency || 'GBP', notes, manual_price || null]);
+      resolvedCurrency, notes, manual_price || null, asset_type || 'Stock', fund_house || null]);
 
   res.status(201).json({ id: result.rows[0].id });
 });
@@ -106,7 +109,7 @@ router.put('/:id', async (req, res) => {
   if (!existing.rows.length) return res.status(404).json({ error: 'Transaction not found' });
   const tx = existing.rows[0];
 
-  const fields = ['share_name','ticker','exchange','purchase_date','purchase_price','units','risk_level','currency','notes','manual_price'];
+  const fields = ['share_name','ticker','exchange','purchase_date','purchase_price','units','risk_level','currency','notes','manual_price','asset_type','fund_house'];
   const updates = {};
   fields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
   if (updates.risk_level) updates.risk_score = RISK_SCORE[updates.risk_level] || tx.risk_score;

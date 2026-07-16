@@ -2,27 +2,17 @@ const axios = require('axios');
 const NodeCache = require('node-cache');
 const { pool } = require('../db/schema');
 
-const cache = new NodeCache({ stdTTL: 300 }); // 5 min in-memory cache
+const cache = new NodeCache({ stdTTL: 300 });
 
 const EXCHANGE_SUFFIXES = {
-  LSE: '.L',
-  NYSE: '',
-  NASDAQ: '',
-  TSX: '.TO',
-  ASX: '.AX',
-  XETRA: '.DE',
-  EURONEXT: '.PA',
-  NSE: '.NS',
-  BSE: '.BO',
-  SET: '.BK',
-  MAI: '.BK',
-  SGX: '.SI',
-  HKEX: '.HK',
-  SZSE: '.SZ',
-  SSE: '.SS',
-  KRX: '.KS',
-  TSE: '.T',
+  LSE: '.L', NYSE: '', NASDAQ: '', TSX: '.TO', ASX: '.AX',
+  XETRA: '.DE', EURONEXT: '.PA', NSE: '.NS', BSE: '.BO',
+  SET: '.BK', MAI: '.BK', SGX: '.SI', HKEX: '.HK',
+  SZSE: '.SZ', SSE: '.SS', KRX: '.KS', TSE: '.T',
 };
+
+// Thai mutual fund exchanges
+const THAI_MF_EXCHANGES = ['TH-MF', 'AIMC'];
 
 function buildYahooTicker(ticker, exchange) {
   const suffix = EXCHANGE_SUFFIXES[exchange?.toUpperCase()] ?? '';
@@ -44,29 +34,71 @@ async function fetchFromYahoo(ticker, exchange) {
   return { price, currency, source: 'yahoo' };
 }
 
+// Fetch Thai mutual fund NAV from SEC Thailand public API
+async function fetchThaiMutualFundNAV(fundCode) {
+  // Try SEC Thailand API
+  try {
+    const url = `https://api.sec.or.th/FundFactsheet/fund/nav?LangCode=E&FundName=${encodeURIComponent(fundCode)}`;
+    const response = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
+    });
+    const data = response.data;
+    if (Array.isArray(data) && data.length > 0) {
+      const latest = data[0];
+      const price = parseFloat(latest.nav || latest.NAV || latest.navPerUnit || latest.NAVPerUnit);
+      if (price && !isNaN(price)) {
+        return { price, currency: 'THB', source: 'sec-thailand', navDate: latest.navDate || latest.NAVDate };
+      }
+    }
+  } catch (e) {
+    // fall through to AIMC
+  }
+
+  // Try AIMC (Thai Mutual Fund Association) as fallback
+  try {
+    const url = `https://www.thaimutualfund.com/overlay/FundDetailOverlay.aspx?id=${encodeURIComponent(fundCode)}`;
+    const response = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
+    });
+    // Parse NAV from HTML response
+    const match = response.data.match(/NAV[^0-9]*([0-9]+\.[0-9]+)/i);
+    if (match) {
+      return { price: parseFloat(match[1]), currency: 'THB', source: 'aimc' };
+    }
+  } catch (e) {
+    // fall through
+  }
+
+  throw new Error(`NAV not found for fund: ${fundCode}. Use manual price override.`);
+}
+
 async function fetchLivePrice(ticker, exchange) {
   const cacheKey = `${ticker}:${exchange}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const data = await fetchFromYahoo(ticker, exchange);
+    let data;
+    if (THAI_MF_EXCHANGES.includes(exchange?.toUpperCase())) {
+      data = await fetchThaiMutualFundNAV(ticker);
+    } else {
+      data = await fetchFromYahoo(ticker, exchange);
+    }
+
     cache.set(cacheKey, data);
 
-    // Upsert into DB
     await pool.query(`
       INSERT INTO live_prices (ticker, exchange, price, currency, source, fetched_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
       ON CONFLICT (ticker, exchange) DO UPDATE SET
-        price = EXCLUDED.price,
-        currency = EXCLUDED.currency,
-        source = EXCLUDED.source,
-        fetched_at = NOW()
+        price = EXCLUDED.price, currency = EXCLUDED.currency,
+        source = EXCLUDED.source, fetched_at = NOW()
     `, [ticker, exchange, data.price, data.currency, data.source]);
 
     return data;
   } catch (err) {
-    // Fall back to last known DB price
     const result = await pool.query(
       'SELECT price, currency, source, fetched_at FROM live_prices WHERE ticker = $1 AND exchange = $2',
       [ticker, exchange]
@@ -76,12 +108,11 @@ async function fetchLivePrice(ticker, exchange) {
   }
 }
 
-// Called by the background job to pre-warm prices for all tracked tickers
 async function refreshAllPrices() {
   try {
-    const result = await pool.query('SELECT DISTINCT ticker, exchange FROM transactions');
+    const result = await pool.query('SELECT DISTINCT ticker, exchange, asset_type FROM transactions');
     const tickers = result.rows;
-    cache.flushAll(); // force re-fetch from Yahoo, not cache
+    cache.flushAll();
     await Promise.allSettled(tickers.map(({ ticker, exchange }) => fetchLivePrice(ticker, exchange)));
     console.log(`[price-refresh] Updated ${tickers.length} tickers at ${new Date().toISOString()}`);
   } catch (err) {
@@ -89,4 +120,4 @@ async function refreshAllPrices() {
   }
 }
 
-module.exports = { fetchLivePrice, refreshAllPrices };
+module.exports = { fetchLivePrice, refreshAllPrices, THAI_MF_EXCHANGES };

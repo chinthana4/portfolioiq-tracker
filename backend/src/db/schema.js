@@ -45,9 +45,15 @@ async function initSchema() {
         currency TEXT DEFAULT 'GBP',
         notes TEXT,
         manual_price NUMERIC,
+        asset_type TEXT NOT NULL DEFAULT 'Stock' CHECK(asset_type IN ('Stock','ETF','Mutual Fund','Bond')),
+        fund_house TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Add columns if they don't exist yet (for existing DBs)
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS asset_type TEXT NOT NULL DEFAULT 'Stock' CHECK(asset_type IN ('Stock','ETF','Mutual Fund','Bond'));
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS fund_house TEXT;
 
       CREATE TABLE IF NOT EXISTS live_prices (
         id SERIAL PRIMARY KEY,

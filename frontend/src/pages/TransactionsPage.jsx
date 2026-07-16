@@ -4,21 +4,22 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import RiskBadge from '../components/RiskBadge';
 
 const RISK_LEVELS = ['Low', 'Medium', 'High', 'Very High'];
+const ASSET_TYPES = ['Stock', 'ETF', 'Mutual Fund', 'Bond'];
 const EXCHANGES = [
   'LSE', 'NYSE', 'NASDAQ', 'TSX', 'ASX',
-  'SET', 'MAI',           // Thailand
-  'SGX',                  // Singapore
-  'HKEX',                 // Hong Kong
-  'TSE',                  // Tokyo
-  'KRX',                  // South Korea
-  'SSE', 'SZSE',          // China
-  'XETRA', 'EURONEXT',
-  'NSE', 'BSE',
+  'SET', 'MAI',
+  'TH-MF',   // Thailand Mutual Funds
+  'SGX', 'HKEX', 'TSE', 'KRX', 'SSE', 'SZSE',
+  'XETRA', 'EURONEXT', 'NSE', 'BSE',
 ];
+
+const CURRENCY_SYMBOLS = { USD: '$', GBP: '£', EUR: '€', THB: '฿', AUD: 'A$', CAD: 'C$', SGD: 'S$', HKD: 'HK$' };
+
+function currSym(c) { return CURRENCY_SYMBOLS[c] || '$'; }
 
 function fmt(n, p = '$') {
   if (n === undefined || n === null) return '—';
-  return `${n < 0 ? '-' : ''}${p}${Math.abs(n).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
+  return `${n < 0 ? '-' : ''}${p}${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 function fmtPct(n) {
   if (n === undefined || n === null) return '—';
@@ -26,10 +27,11 @@ function fmtPct(n) {
 }
 
 const emptyForm = {
-  platform_id: '', share_name: '', ticker: '', exchange: 'LSE',
+  asset_type: 'Stock',
+  platform_id: '', share_name: '', ticker: '', exchange: 'NYSE',
   purchase_date: new Date().toISOString().slice(0, 10),
   purchase_price: '', units: '', risk_level: 'Medium',
-  currency: 'GBP', notes: '', manual_price: '',
+  currency: 'USD', notes: '', manual_price: '', fund_house: '',
 };
 
 export default function TransactionsPage() {
@@ -68,12 +70,25 @@ export default function TransactionsPage() {
   const openEdit = tx => {
     setEditing(tx);
     setForm({
+      asset_type: tx.asset_type || 'Stock',
       platform_id: tx.platform_id, share_name: tx.share_name, ticker: tx.ticker,
       exchange: tx.exchange, purchase_date: tx.purchase_date,
       purchase_price: tx.purchase_price, units: tx.units, risk_level: tx.risk_level,
       currency: tx.currency, notes: tx.notes || '', manual_price: tx.manual_price || '',
+      fund_house: tx.fund_house || '',
     });
     setLivePrice(null); setShowForm(true);
+  };
+
+  // When asset type changes, auto-set sensible defaults for exchange/currency
+  const onAssetTypeChange = e => {
+    const at = e.target.value;
+    setForm(f => ({
+      ...f,
+      asset_type: at,
+      exchange: at === 'Mutual Fund' ? 'TH-MF' : (f.exchange === 'TH-MF' ? 'NYSE' : f.exchange),
+      currency: at === 'Mutual Fund' ? 'THB' : (f.currency === 'THB' ? 'USD' : f.currency),
+    }));
   };
 
   const fetchPrice = async () => {
@@ -203,8 +218,22 @@ export default function TransactionsPage() {
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowForm(false)}>
           <div className="modal">
             <h2>{editing ? 'Edit Transaction' : 'Add Transaction'}</h2>
+
+            {/* Asset type banner for mutual funds */}
+            {form.asset_type === 'Mutual Fund' && (
+              <div style={{ background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#93c5fd' }}>
+                <strong>Thai Mutual Fund</strong> — NAV is fetched daily from SEC Thailand. Use fund code as Ticker (e.g. KFLTFDIV-A). If NAV fetch fails, enter manually.
+              </div>
+            )}
+
             <form onSubmit={submit}>
               <div className="form-grid">
+                <div className="form-group">
+                  <label>Asset Type *</label>
+                  <select value={form.asset_type} onChange={onAssetTypeChange} required>
+                    {ASSET_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </div>
                 <div className="form-group">
                   <label>Platform *</label>
                   <select value={form.platform_id} onChange={set('platform_id')} required>
@@ -219,23 +248,32 @@ export default function TransactionsPage() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Share Name *</label>
-                  <input placeholder="Apple Inc." value={form.share_name} onChange={set('share_name')} required />
+                  <label>{form.asset_type === 'Mutual Fund' ? 'Fund Name *' : 'Share Name *'}</label>
+                  <input placeholder={form.asset_type === 'Mutual Fund' ? 'Krungsri LTF Dividend' : 'Apple Inc.'} value={form.share_name} onChange={set('share_name')} required />
                 </div>
                 <div className="form-group">
-                  <label>Ticker *</label>
-                  <input placeholder="AAPL" value={form.ticker} onChange={set('ticker')} required style={{ textTransform: 'uppercase' }} />
+                  <label>{form.asset_type === 'Mutual Fund' ? 'Fund Code *' : 'Ticker *'}</label>
+                  <input placeholder={form.asset_type === 'Mutual Fund' ? 'KFLTFDIV-A' : 'AAPL'} value={form.ticker} onChange={set('ticker')} required style={{ textTransform: 'uppercase' }} />
                 </div>
-                <div className="form-group">
-                  <label>Exchange *</label>
-                  <select value={form.exchange} onChange={set('exchange')} required>
-                    {EXCHANGES.map(e => <option key={e}>{e}</option>)}
-                  </select>
-                </div>
+                {form.asset_type === 'Mutual Fund' && (
+                  <div className="form-group">
+                    <label>Fund House</label>
+                    <input placeholder="e.g. Kasikorn, SCB, Bangkok Bank" value={form.fund_house} onChange={set('fund_house')} />
+                  </div>
+                )}
+                {form.asset_type !== 'Mutual Fund' && (
+                  <div className="form-group">
+                    <label>Exchange *</label>
+                    <select value={form.exchange} onChange={set('exchange')} required>
+                      {EXCHANGES.filter(e => e !== 'TH-MF').map(e => <option key={e}>{e}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="form-group">
                   <label>Currency</label>
                   <select value={form.currency} onChange={set('currency')}>
-                    <option>GBP</option><option>USD</option><option>EUR</option><option>CAD</option><option>AUD</option>
+                    <option>USD</option><option>THB</option><option>GBP</option><option>EUR</option>
+                    <option>SGD</option><option>HKD</option><option>AUD</option><option>CAD</option>
                   </select>
                 </div>
                 <div className="form-group">
