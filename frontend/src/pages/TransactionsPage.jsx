@@ -224,7 +224,7 @@ export default function TransactionsPage() {
 
             {/* Asset type banner for mutual funds */}
             {form.asset_type === 'Mutual Fund' && (
-              <div style={{ background: '#1e3a5f', border: '1px solid #3b82f6', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#93c5fd' }}>
+              <div style={{ background: '#6d28ff11', border: '1px solid #6d28ff', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#5b1fe0' }}>
                 <strong>Thai Mutual Fund</strong> — NAV is fetched daily from SEC Thailand. Use fund code as Ticker (e.g. KFLTFDIV-A). If NAV fetch fails, enter manually.
               </div>
             )}
