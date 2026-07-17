@@ -92,17 +92,27 @@ function aggregateByShare(enrichedTxs) {
         current_value: 0,
         pnl: 0,
         units: 0,
+        earliest_purchase_date: tx.purchase_date,
       };
     }
     groups[key].cost_basis += tx.cost_basis;
     groups[key].current_value += tx.current_value;
     groups[key].pnl += tx.pnl;
     groups[key].units += tx.units;
+    if (new Date(tx.purchase_date) < new Date(groups[key].earliest_purchase_date)) {
+      groups[key].earliest_purchase_date = tx.purchase_date;
+    }
   }
-  return Object.values(groups).map(g => ({
-    ...g,
-    simple_roi: calcROI(g.cost_basis, g.current_value),
-  }));
+  return Object.values(groups).map(g => {
+    const simpleROI = calcROI(g.cost_basis, g.current_value);
+    const holdingDays = calcHoldingDays(g.earliest_purchase_date);
+    return {
+      ...g,
+      simple_roi: simpleROI,
+      holding_days: holdingDays,
+      annualised_roi: calcAnnualisedROI(simpleROI, holdingDays),
+    };
+  });
 }
 
 module.exports = { enrichTransaction, aggregateByRisk, aggregateByPlatform, aggregateByShare };

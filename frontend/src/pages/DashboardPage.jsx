@@ -261,7 +261,7 @@ export default function DashboardPage() {
             <div style={{ overflowX: 'auto' }}>
               <table>
                 <thead>
-                  <tr><th>Type</th><th>Ticker</th><th>Name</th><th>Ccy</th><th>Units</th><th>Bought At</th><th>Live Price</th><th>Invested</th><th>Value</th><th>P&L</th><th>ROI</th><th>Risk</th></tr>
+                  <tr><th>Type</th><th>Ticker</th><th>Name</th><th>Ccy</th><th>Units</th><th>Bought At</th><th>Live Price</th><th>Invested</th><th>Value</th><th>P&L</th><th>ROI</th><th>Ann. ROI</th><th>Risk</th></tr>
                 </thead>
                 <tbody>
                   {summary.by_share.sort((a,b) => b.current_value - a.current_value).map(s => {
@@ -282,6 +282,7 @@ export default function DashboardPage() {
                         <td>{fmt(s.current_value, c)}</td>
                         <td className={s.pnl >= 0 ? 'positive' : 'negative'}>{fmt(s.pnl, c)}</td>
                         <td className={s.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(s.simple_roi)}</td>
+                        <td className={s.annualised_roi >= 0 ? 'positive' : 'negative'} title={`Based on ${s.holding_days}d held`}>{fmtPct(s.annualised_roi)}</td>
                         <td><RiskBadge level={s.risk_level} /></td>
                       </tr>
                     );
