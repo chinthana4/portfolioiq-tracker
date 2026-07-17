@@ -4,6 +4,12 @@ function calcHoldingDays(purchaseDate) {
   return Math.max(1, Math.floor((now - purchase) / (1000 * 60 * 60 * 24)));
 }
 
+function calcHoldingDaysBetween(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  return Math.max(1, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
+}
+
 function calcROI(costBasis, currentValue) {
   if (costBasis === 0) return 0;
   return ((currentValue - costBasis) / costBasis) * 100;
@@ -121,29 +127,92 @@ function aggregateByShare(enrichedTxs) {
         lots: [],
       };
     }
+    // Use remaining (unsold) units for the open position, not the original lot size.
+    const openUnits = tx.remaining_units ?? tx.units;
     groups[key].cost_basis += tx.cost_basis;
     groups[key].current_value += tx.current_value;
     groups[key].pnl += tx.pnl;
-    groups[key].units += tx.units;
-    groups[key].lots.push({ amount: -tx.cost_basis, date: tx.purchase_date });
+    groups[key].units += openUnits;
+    if (openUnits > 0) groups[key].lots.push({ amount: -tx.cost_basis, date: tx.purchase_date });
     if (new Date(tx.purchase_date) < new Date(groups[key].earliest_purchase_date)) {
       groups[key].earliest_purchase_date = tx.purchase_date;
     }
   }
-  return Object.values(groups).map(g => {
-    const simpleROI = calcROI(g.cost_basis, g.current_value);
-    const holdingDays = calcHoldingDays(g.earliest_purchase_date);
-    // Money-weighted (XIRR): each lot is a dated outflow, current value is today's inflow.
-    const cashflows = [...g.lots].sort((a, b) => new Date(a.date) - new Date(b.date));
-    cashflows.push({ amount: g.current_value, date: new Date().toISOString().slice(0, 10) });
-    const { lots, ...rest } = g;
-    return {
-      ...rest,
-      simple_roi: simpleROI,
-      holding_days: holdingDays,
-      annualised_roi: calcXIRR(cashflows),
-    };
-  });
+  return Object.values(groups)
+    .filter(g => g.units > 0) // fully-sold positions have nothing left to show as a holding
+    .map(g => {
+      const simpleROI = calcROI(g.cost_basis, g.current_value);
+      const holdingDays = calcHoldingDays(g.earliest_purchase_date);
+      // Money-weighted (XIRR): each lot is a dated outflow, current value is today's inflow.
+      const cashflows = [...g.lots].sort((a, b) => new Date(a.date) - new Date(b.date));
+      cashflows.push({ amount: g.current_value, date: new Date().toISOString().slice(0, 10) });
+      const { lots, ...rest } = g;
+      return {
+        ...rest,
+        simple_roi: simpleROI,
+        holding_days: holdingDays,
+        annualised_roi: calcXIRR(cashflows),
+      };
+    });
 }
 
-module.exports = { enrichTransaction, aggregateByRisk, aggregateByPlatform, aggregateByShare };
+// Turns a raw sale row (joined with its source transaction/lot) into realized P&L figures.
+function enrichSale(sale) {
+  const costBasis = sale.purchase_price * sale.units_sold;
+  const proceeds = sale.sale_price * sale.units_sold;
+  const pnl = proceeds - costBasis;
+  const holdingDays = calcHoldingDaysBetween(sale.purchase_date, sale.sale_date);
+  const simpleROI = calcROI(costBasis, proceeds);
+  const annualisedROI = calcAnnualisedROI(simpleROI, holdingDays);
+
+  return {
+    ...sale,
+    cost_basis: costBasis,
+    proceeds,
+    pnl,
+    holding_days: holdingDays,
+    simple_roi: simpleROI,
+    annualised_roi: annualisedROI,
+  };
+}
+
+function aggregateRealizedByShare(enrichedSales) {
+  const groups = {};
+  for (const s of enrichedSales) {
+    const key = s.ticker;
+    if (!groups[key]) {
+      groups[key] = {
+        ticker: s.ticker, share_name: s.share_name, exchange: s.exchange,
+        currency: s.currency || 'USD', asset_type: s.asset_type || 'Stock',
+        cost_basis: 0, proceeds: 0, pnl: 0, units_sold: 0,
+      };
+    }
+    groups[key].cost_basis += s.cost_basis;
+    groups[key].proceeds += s.proceeds;
+    groups[key].pnl += s.pnl;
+    groups[key].units_sold += Number(s.units_sold);
+  }
+  return Object.values(groups).map(g => ({
+    ...g,
+    simple_roi: calcROI(g.cost_basis, g.proceeds),
+  }));
+}
+
+function summarizeRealized(enrichedSales) {
+  const totalCostBasis = enrichedSales.reduce((s, x) => s + x.cost_basis, 0);
+  const totalProceeds = enrichedSales.reduce((s, x) => s + x.proceeds, 0);
+  const totalPnl = totalProceeds - totalCostBasis;
+  return {
+    total_cost_basis: totalCostBasis,
+    total_proceeds: totalProceeds,
+    total_realized_pnl: totalPnl,
+    overall_realized_roi: calcROI(totalCostBasis, totalProceeds),
+    by_share: aggregateRealizedByShare(enrichedSales),
+    sale_count: enrichedSales.length,
+  };
+}
+
+module.exports = {
+  enrichTransaction, aggregateByRisk, aggregateByPlatform, aggregateByShare,
+  enrichSale, summarizeRealized, calcROI, calcAnnualisedROI, calcHoldingDaysBetween,
+};

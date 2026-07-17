@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { transactions as txApi, prices as priceApi } from '../services/api';
+import { transactions as txApi, prices as priceApi, sales as salesApi } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import KPICard from '../components/KPICard';
 import RiskBadge from '../components/RiskBadge';
@@ -109,6 +109,7 @@ function NavUpdateModal({ onClose, onSaved }) {
 
 export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
+  const [realized, setRealized] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState('');
@@ -116,8 +117,9 @@ export default function DashboardPage() {
 
   const fetchSummary = useCallback(async () => {
     try {
-      const data = await txApi.summary();
+      const [data, realizedData] = await Promise.all([txApi.summary(), salesApi.summary()]);
       setSummary(data);
+      setRealized(realizedData);
       setLastUpdated(new Date());
       setError('');
     } catch (err) {
@@ -147,9 +149,24 @@ export default function DashboardPage() {
     }
     return map;
   })();
-  const currencies = Object.keys(byCurrency);
+  // Realized P&L grouped by currency (same reasoning as unrealized above — never mix THB+USD)
+  const realizedByCurrency = (() => {
+    if (!realized?.by_share?.length) return {};
+    const map = {};
+    for (const s of realized.by_share) {
+      const c = s.currency || 'USD';
+      if (!map[c]) map[c] = { cost_basis: 0, proceeds: 0, pnl: 0 };
+      map[c].cost_basis += s.cost_basis;
+      map[c].proceeds   += s.proceeds;
+      map[c].pnl        += s.pnl;
+    }
+    return map;
+  })();
+  // Union of currencies from open holdings and realized sales, so a fully-exited
+  // currency (no longer in byCurrency) still gets its own KPI row.
+  const currencies = [...new Set([...Object.keys(byCurrency), ...Object.keys(realizedByCurrency)])];
   // dominant for charts (most value)
-  const dominantCurrency = currencies.sort((a, b) => byCurrency[b].value - byCurrency[a].value)[0] || 'USD';
+  const dominantCurrency = [...currencies].sort((a, b) => (byCurrency[b]?.value || 0) - (byCurrency[a]?.value || 0))[0] || 'USD';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -186,13 +203,19 @@ export default function DashboardPage() {
         <>
           {/* KPI Cards — one row per currency so ฿ and $ never mix */}
           {currencies.map(c => {
-            const g = byCurrency[c];
+            const g = byCurrency[c] || { invested: 0, value: 0, pnl: 0 };
+            const r = realizedByCurrency[c] || { pnl: 0 };
             const pnlT = g.pnl >= 0 ? 'positive' : 'negative';
+            const realizedT = r.pnl >= 0 ? 'positive' : 'negative';
+            const totalReturn = g.pnl + r.pnl;
+            const totalReturnT = totalReturn >= 0 ? 'positive' : 'negative';
             return (
               <div key={c} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
                 <KPICard label={`Invested (${c})`}      value={g.invested} prefix={sym(c)} />
                 <KPICard label={`Current Value (${c})`} value={g.value}    prefix={sym(c)} />
-                <KPICard label={`P&L (${c})`}           value={g.pnl}      prefix={sym(c)} type={pnlT} />
+                <KPICard label={`Unrealized P&L (${c})`} value={g.pnl}      prefix={sym(c)} type={pnlT} />
+                <KPICard label={`Realized P&L (${c})`}   value={r.pnl}      prefix={sym(c)} type={realizedT} sub={`${realized?.by_share?.filter(s => (s.currency||'USD')===c).length || 0} sales`} />
+                <KPICard label={`Total Return (${c})`}   value={totalReturn} prefix={sym(c)} type={totalReturnT} />
                 <KPICard label="Overall ROI"            value={summary.overall_roi} prefix="" suffix="%" type={roiType} />
                 <KPICard label="Positions"              value={summary.transaction_count} prefix="" sub="individual lots" />
               </div>
@@ -291,6 +314,36 @@ export default function DashboardPage() {
               </table>
             </div>
           </div>
+
+          {/* Realized Sales — positions (or partial lots) already closed out */}
+          {realized?.by_share?.length > 0 && (
+            <div className="card">
+              <div style={{ fontWeight: 600, marginBottom: 16 }}>Realized Sales (Closed Positions)</div>
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr><th>Ticker</th><th>Name</th><th>Units Sold</th><th>Cost Basis</th><th>Proceeds</th><th>Realized P&L</th><th>ROI</th></tr>
+                  </thead>
+                  <tbody>
+                    {realized.by_share.sort((a, b) => b.pnl - a.pnl).map(s => {
+                      const c = s.currency || 'USD';
+                      return (
+                        <tr key={s.ticker}>
+                          <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{s.ticker}</td>
+                          <td>{s.share_name}</td>
+                          <td>{Number(s.units_sold).toFixed(Number(s.units_sold) % 1 === 0 ? 0 : 4)}</td>
+                          <td>{fmt(s.cost_basis, c)}</td>
+                          <td>{fmt(s.proceeds, c)}</td>
+                          <td className={s.pnl >= 0 ? 'positive' : 'negative'}>{fmt(s.pnl, c)}</td>
+                          <td className={s.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(s.simple_roi)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

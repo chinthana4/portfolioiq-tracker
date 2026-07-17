@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { transactions as txApi, platforms as platformApi, prices as priceApi } from '../services/api';
+import { transactions as txApi, platforms as platformApi, prices as priceApi, sales as salesApi } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import RiskBadge from '../components/RiskBadge';
 
@@ -46,6 +46,10 @@ export default function TransactionsPage() {
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sellTx, setSellTx] = useState(null);
+  const [sellForm, setSellForm] = useState({ sale_date: new Date().toISOString().slice(0, 10), sale_price: '', units: '', notes: '' });
+  const [sellError, setSellError] = useState('');
+  const [selling, setSelling] = useState(false);
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -122,6 +126,33 @@ export default function TransactionsPage() {
     await txApi.delete(id); loadAll();
   };
 
+  const openSell = tx => {
+    setSellTx(tx);
+    setSellForm({
+      sale_date: new Date().toISOString().slice(0, 10),
+      sale_price: tx.current_price ? String(tx.current_price) : '',
+      units: String(tx.remaining_units ?? tx.units),
+      notes: '',
+    });
+    setSellError('');
+  };
+
+  const submitSell = async e => {
+    e.preventDefault(); setSelling(true); setSellError('');
+    try {
+      await salesApi.create({
+        ticker: sellTx.ticker,
+        sale_date: sellForm.sale_date,
+        sale_price: parseFloat(sellForm.sale_price),
+        units: parseFloat(sellForm.units),
+        notes: sellForm.notes,
+      });
+      setSellTx(null);
+      loadAll();
+    } catch (err) { setSellError(err); }
+    finally { setSelling(false); }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -172,6 +203,7 @@ export default function TransactionsPage() {
                   <th>Date</th>
                   <th>Buy Price</th>
                   <th>Units</th>
+                  <th>Remaining</th>
                   <th>Cost Basis</th>
                   <th>Curr. Price</th>
                   <th>Value</th>
@@ -186,14 +218,17 @@ export default function TransactionsPage() {
               <tbody>
                 {txs.map(tx => {
                   const cs = currSym(tx.currency || 'USD');
+                  const remaining = tx.remaining_units ?? tx.units;
+                  const fullySold = remaining <= 0;
                   return (
-                  <tr key={tx.id}>
+                  <tr key={tx.id} style={fullySold ? { opacity: 0.5 } : undefined}>
                     <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{tx.ticker}</td>
                     <td>{tx.share_name}</td>
                     <td style={{ color: 'var(--text2)' }}>{tx.platform_name}</td>
                     <td style={{ color: 'var(--text2)' }}>{new Date(tx.purchase_date).toLocaleDateString('en-GB')}</td>
                     <td>{fmt(tx.purchase_price, cs)}</td>
                     <td>{tx.units}</td>
+                    <td style={fullySold ? { color: 'var(--text2)' } : undefined}>{remaining}{fullySold ? ' (sold)' : ''}</td>
                     <td>{fmt(tx.cost_basis, cs)}</td>
                     <td>{fmt(tx.current_price, cs)}</td>
                     <td>{fmt(tx.current_value, cs)}</td>
@@ -204,6 +239,9 @@ export default function TransactionsPage() {
                     <td style={{ color: 'var(--text2)' }}>{tx.holding_days}d</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
+                        {!fullySold && (
+                          <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--green)', borderColor: 'var(--green)' }} onClick={() => openSell(tx)}>Sell</button>
+                        )}
                         <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => openEdit(tx)}>Edit</button>
                         <button className="btn-danger" onClick={() => remove(tx.id)}>✕</button>
                       </div>
@@ -319,6 +357,45 @@ export default function TransactionsPage() {
                 <button type="button" className="btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
                 <button type="submit" className="btn-primary" disabled={saving}>
                   {saving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : editing ? 'Save Changes' : 'Add Transaction'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {sellTx && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setSellTx(null)}>
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <h2>Sell {sellTx.ticker}</h2>
+            <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 16 }}>
+              Selling deducts units FIFO — oldest purchase lots for this ticker are sold first.
+              You currently hold <strong>{sellTx.remaining_units ?? sellTx.units}</strong> units across all lots.
+            </p>
+            <form onSubmit={submitSell}>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>Sale Date *</label>
+                  <input type="date" value={sellForm.sale_date} onChange={e => setSellForm(f => ({ ...f, sale_date: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                  <label>Sale Price *</label>
+                  <input type="number" step="0.0001" min="0" value={sellForm.sale_price} onChange={e => setSellForm(f => ({ ...f, sale_price: e.target.value }))} required />
+                </div>
+                <div className="form-group">
+                  <label>Units to Sell *</label>
+                  <input type="number" step="0.0001" min="0" max={sellTx.remaining_units ?? sellTx.units} value={sellForm.units} onChange={e => setSellForm(f => ({ ...f, units: e.target.value }))} required />
+                </div>
+                <div className="form-group full">
+                  <label>Notes</label>
+                  <input placeholder="Optional notes" value={sellForm.notes} onChange={e => setSellForm(f => ({ ...f, notes: e.target.value }))} />
+                </div>
+              </div>
+              {sellError && <div style={{ color: 'var(--red)', fontSize: 13, marginTop: 10 }}>{String(sellError)}</div>}
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+                <button type="button" className="btn-ghost" onClick={() => setSellTx(null)}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={selling}>
+                  {selling ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Confirm Sale'}
                 </button>
               </div>
             </form>

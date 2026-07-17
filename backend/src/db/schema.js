@@ -71,6 +71,18 @@ async function initSchema() {
         UNIQUE(ticker, exchange)
       );
 
+      CREATE TABLE IF NOT EXISTS sales (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        sale_date DATE NOT NULL,
+        sale_price NUMERIC NOT NULL,
+        units_sold NUMERIC NOT NULL,
+        proceeds NUMERIC NOT NULL,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS historical_valuations (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

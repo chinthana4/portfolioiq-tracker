@@ -38,6 +38,13 @@ export const transactions = {
   delete:  id     => api.delete(`/transactions/${id}`),
 };
 
+export const sales = {
+  list:    ()  => api.get('/sales'),
+  summary: ()  => api.get('/sales/summary'),
+  create:  d   => api.post('/sales', d),
+  delete:  id  => api.delete(`/sales/${id}`),
+};
+
 export const prices = {
   live:    (ticker, exchange) => api.get('/prices/live', { params: { ticker, exchange } }),
   refresh: ()                 => api.post('/prices/refresh'),

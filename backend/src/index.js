@@ -8,6 +8,7 @@ const { initSchema } = require('./db/schema');
 const authRoutes        = require('./routes/auth');
 const platformRoutes    = require('./routes/platforms');
 const transactionRoutes = require('./routes/transactions');
+const salesRoutes       = require('./routes/sales');
 const priceRoutes       = require('./routes/prices');
 const { refreshAllPrices } = require('./services/priceService');
 
@@ -25,6 +26,7 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, l
 app.use('/api/auth',         authRoutes);
 app.use('/api/platforms',    platformRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/sales',        salesRoutes);
 app.use('/api/prices',       priceRoutes);
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

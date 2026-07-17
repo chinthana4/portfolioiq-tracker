@@ -20,7 +20,8 @@ router.get('/', async (req, res) => {
   if (ticker)      { conditions.push(`t.ticker = $${idx++}`); params.push(ticker.toUpperCase()); }
 
   const sql = `
-    SELECT t.*, p.name as platform_name
+    SELECT t.*, p.name as platform_name,
+      t.units - COALESCE((SELECT SUM(s.units_sold) FROM sales s WHERE s.transaction_id = t.id), 0) AS remaining_units
     FROM transactions t
     JOIN platforms p ON p.id = t.platform_id
     WHERE ${conditions.join(' AND ')}
@@ -31,12 +32,18 @@ router.get('/', async (req, res) => {
   const txs = result.rows;
 
   const enriched = await Promise.all(txs.map(async (tx) => {
+    const originalUnits = Number(tx.units);
+    const remainingUnits = Number(tx.remaining_units);
+    // Unrealized P&L should only reflect units still held, not units already sold.
+    const calcTx = { ...tx, units: remainingUnits };
+    let result;
     try {
       const priceData = await fetchLivePrice(tx.ticker, tx.exchange);
-      return enrichTransaction(tx, priceData.price);
+      result = enrichTransaction(calcTx, priceData.price);
     } catch {
-      return enrichTransaction(tx, tx.manual_price);
+      result = enrichTransaction(calcTx, tx.manual_price);
     }
+    return { ...result, units: originalUnits, remaining_units: remainingUnits };
   }));
 
   res.json(enriched);
@@ -44,7 +51,8 @@ router.get('/', async (req, res) => {
 
 router.get('/summary', async (req, res) => {
   const result = await pool.query(`
-    SELECT t.*, p.name as platform_name
+    SELECT t.*, p.name as platform_name,
+      t.units - COALESCE((SELECT SUM(s.units_sold) FROM sales s WHERE s.transaction_id = t.id), 0) AS remaining_units
     FROM transactions t
     JOIN platforms p ON p.id = t.platform_id
     WHERE t.user_id = $1
@@ -53,12 +61,17 @@ router.get('/summary', async (req, res) => {
   const txs = result.rows;
 
   const enriched = await Promise.all(txs.map(async (tx) => {
+    const originalUnits = Number(tx.units);
+    const remainingUnits = Number(tx.remaining_units);
+    const calcTx = { ...tx, units: remainingUnits };
+    let result;
     try {
       const priceData = await fetchLivePrice(tx.ticker, tx.exchange);
-      return enrichTransaction(tx, priceData.price);
+      result = enrichTransaction(calcTx, priceData.price);
     } catch {
-      return enrichTransaction(tx, tx.manual_price);
+      result = enrichTransaction(calcTx, tx.manual_price);
     }
+    return { ...result, units: originalUnits, remaining_units: remainingUnits };
   }));
 
   const totalInvested = enriched.reduce((s, t) => s + Number(t.cost_basis), 0);
