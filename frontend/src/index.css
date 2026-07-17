@@ -1,12 +1,12 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #f4f6fb;
+  --bg: #ece4ff;
   --bg2: #ffffff;
-  --bg3: #eef1fb;
-  --border: #dbe1f5;
+  --bg3: #f4ecff;
+  --border: #dcc9ff;
   --text: #1e2233;
-  --text2: #6b7290;
+  --text2: #6b5b8a;
   --primary: #6d28ff;
   --primary-hover: #5b1fe0;
   --green: #00c853;
@@ -14,12 +14,13 @@
   --yellow: #ffb300;
   --purple: #d500f9;
   --radius: 10px;
-  --shadow: 0 4px 24px rgba(109,40,255,0.08);
+  --shadow: 0 4px 24px rgba(109,40,255,0.1);
 }
 
 body {
   font-family: 'Inter', sans-serif;
-  background: var(--bg);
+  background: linear-gradient(135deg, #ffe3f3 0%, #ece4ff 45%, #dff2ff 100%);
+  background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
   font-size: 14px;
