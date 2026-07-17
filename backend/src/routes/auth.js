@@ -43,4 +43,18 @@ router.get('/me', authenticate, (req, res) => {
   res.json({ user: req.user });
 });
 
+// TEMPORARY one-time admin password reset, gated by a server-only secret env var.
+// Remove this route once used.
+router.post('/admin-reset-password', async (req, res) => {
+  const { email, new_password, secret } = req.body;
+  if (!process.env.ADMIN_RESET_SECRET || secret !== process.env.ADMIN_RESET_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (!email || !new_password) return res.status(400).json({ error: 'email and new_password required' });
+  const hash = bcrypt.hashSync(new_password, 10);
+  const result = await pool.query('UPDATE users SET password_hash = $1 WHERE email = $2 RETURNING id, email', [hash, email]);
+  if (!result.rows.length) return res.status(404).json({ error: 'User not found' });
+  res.json({ success: true, user: result.rows[0] });
+});
+
 module.exports = router;
