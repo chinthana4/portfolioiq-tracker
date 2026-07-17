@@ -15,6 +15,31 @@ function calcAnnualisedROI(simpleROI, holdingDays) {
   return (Math.pow(1 + simpleROI / 100, 1 / fraction) - 1) * 100;
 }
 
+// Money-weighted annualised return (XIRR) via bisection.
+// cashflows: [{ amount, date }] — negative = money in (purchase), positive = money out / current value.
+function calcXIRR(cashflows) {
+  if (cashflows.length < 2) return 0;
+  const t0 = new Date(cashflows[0].date).getTime();
+  const flows = cashflows.map(cf => ({
+    amount: cf.amount,
+    years: (new Date(cf.date).getTime() - t0) / (365.25 * 24 * 60 * 60 * 1000),
+  }));
+
+  const npv = rate => flows.reduce((s, f) => s + f.amount / Math.pow(1 + rate, f.years), 0);
+
+  let lo = -0.9999, hi = 100;
+  let npvLo = npv(lo), npvHi = npv(hi);
+  if (npvLo * npvHi > 0) return 0; // no sign change — XIRR undefined for these flows
+
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const v = npv(mid);
+    if (Math.abs(v) < 1e-9) { lo = hi = mid; break; }
+    if (v * npvLo < 0) { hi = mid; npvHi = v; } else { lo = mid; npvLo = v; }
+  }
+  return ((lo + hi) / 2) * 100;
+}
+
 function enrichTransaction(tx, livePrice) {
   const costBasis = tx.purchase_price * tx.units;
   const currentPrice = livePrice ?? tx.manual_price ?? tx.purchase_price;
@@ -93,12 +118,14 @@ function aggregateByShare(enrichedTxs) {
         pnl: 0,
         units: 0,
         earliest_purchase_date: tx.purchase_date,
+        lots: [],
       };
     }
     groups[key].cost_basis += tx.cost_basis;
     groups[key].current_value += tx.current_value;
     groups[key].pnl += tx.pnl;
     groups[key].units += tx.units;
+    groups[key].lots.push({ amount: -tx.cost_basis, date: tx.purchase_date });
     if (new Date(tx.purchase_date) < new Date(groups[key].earliest_purchase_date)) {
       groups[key].earliest_purchase_date = tx.purchase_date;
     }
@@ -106,11 +133,15 @@ function aggregateByShare(enrichedTxs) {
   return Object.values(groups).map(g => {
     const simpleROI = calcROI(g.cost_basis, g.current_value);
     const holdingDays = calcHoldingDays(g.earliest_purchase_date);
+    // Money-weighted (XIRR): each lot is a dated outflow, current value is today's inflow.
+    const cashflows = [...g.lots].sort((a, b) => new Date(a.date) - new Date(b.date));
+    cashflows.push({ amount: g.current_value, date: new Date().toISOString().slice(0, 10) });
+    const { lots, ...rest } = g;
     return {
-      ...g,
+      ...rest,
       simple_roi: simpleROI,
       holding_days: holdingDays,
-      annualised_roi: calcAnnualisedROI(simpleROI, holdingDays),
+      annualised_roi: calcXIRR(cashflows),
     };
   });
 }
