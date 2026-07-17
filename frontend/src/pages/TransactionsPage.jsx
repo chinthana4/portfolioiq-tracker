@@ -19,7 +19,7 @@ function currSym(c) { return CURRENCY_SYMBOLS[c] || '$'; }
 
 function fmt(n, p = '$') {
   if (n === undefined || n === null) return '—';
-  return `${n < 0 ? '-' : ''}${p}${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  return `${n < 0 ? '-' : ''}${p}${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 function fmtPct(n) {
   if (n === undefined || n === null) return '—';
@@ -187,73 +187,85 @@ export default function TransactionsPage() {
 
       {error && <div style={{ color: 'var(--red)', padding: '10px 14px', background: '#ef444422', borderRadius: 8 }}>{String(error)}</div>}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><div className="spinner" /></div>
-        ) : txs.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 48, color: 'var(--text2)' }}>No transactions found.</div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Name</th>
-                  <th>Platform</th>
-                  <th>Date</th>
-                  <th>Buy Price</th>
-                  <th>Units</th>
-                  <th>Remaining</th>
-                  <th>Cost Basis</th>
-                  <th>Curr. Price</th>
-                  <th>Value</th>
-                  <th>P&L</th>
-                  <th>ROI</th>
-                  <th>Ann. ROI</th>
-                  <th>Risk</th>
-                  <th>Days</th>
-                  <th style={{ width: 80 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {txs.map(tx => {
-                  const cs = currSym(tx.currency || 'USD');
-                  const remaining = tx.remaining_units ?? tx.units;
-                  const fullySold = remaining <= 0;
-                  return (
-                  <tr key={tx.id} style={fullySold ? { opacity: 0.5 } : undefined}>
-                    <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{tx.ticker}</td>
-                    <td>{tx.share_name}</td>
-                    <td style={{ color: 'var(--text2)' }}>{tx.platform_name}</td>
-                    <td style={{ color: 'var(--text2)' }}>{new Date(tx.purchase_date).toLocaleDateString('en-GB')}</td>
-                    <td>{fmt(tx.purchase_price, cs)}</td>
-                    <td>{tx.units}</td>
-                    <td style={fullySold ? { color: 'var(--text2)' } : undefined}>{remaining}{fullySold ? ' (sold)' : ''}</td>
-                    <td>{fmt(tx.cost_basis, cs)}</td>
-                    <td>{fmt(tx.current_price, cs)}</td>
-                    <td>{fmt(tx.current_value, cs)}</td>
-                    <td className={tx.pnl >= 0 ? 'positive' : 'negative'}>{fmt(tx.pnl, cs)}</td>
-                    <td className={tx.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.simple_roi)}</td>
-                    <td className={tx.annualised_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.annualised_roi)}</td>
-                    <td><RiskBadge level={tx.risk_level} /></td>
-                    <td style={{ color: 'var(--text2)' }}>{tx.holding_days}d</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        {!fullySold && (
-                          <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--green)', borderColor: 'var(--green)' }} onClick={() => openSell(tx)}>Sell</button>
-                        )}
-                        <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => openEdit(tx)}>Edit</button>
-                        <button className="btn-danger" onClick={() => remove(tx.id)}>✕</button>
-                      </div>
-                    </td>
+      {loading ? (
+        <div className="card"><div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><div className="spinner" /></div></div>
+      ) : txs.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text2)' }}>No transactions found.</div>
+      ) : (
+        Object.entries(
+          txs.reduce((acc, tx) => {
+            const p = tx.platform_name || 'Other';
+            (acc[p] = acc[p] || []).push(tx);
+            return acc;
+          }, {})
+        ).sort(([a], [b]) => a.localeCompare(b)).map(([platformName, platformTxs]) => (
+          <div className="card" key={platformName} style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 15 }}>
+              {platformName}
+              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text2)', marginLeft: 10 }}>
+                {platformTxs.length} lot{platformTxs.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Name</th>
+                    <th>Date</th>
+                    <th>Buy Price</th>
+                    <th>Units</th>
+                    <th>Remaining</th>
+                    <th>Cost Basis</th>
+                    <th>Curr. Price</th>
+                    <th>Value</th>
+                    <th>P&L</th>
+                    <th>ROI</th>
+                    <th>Ann. ROI</th>
+                    <th>Risk</th>
+                    <th>Days</th>
+                    <th style={{ width: 80 }}></th>
                   </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {platformTxs.map(tx => {
+                    const cs = currSym(tx.currency || 'USD');
+                    const remaining = tx.remaining_units ?? tx.units;
+                    const fullySold = remaining <= 0;
+                    return (
+                    <tr key={tx.id} style={fullySold ? { opacity: 0.5 } : undefined}>
+                      <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{tx.ticker}</td>
+                      <td>{tx.share_name}</td>
+                      <td style={{ color: 'var(--text2)' }}>{new Date(tx.purchase_date).toLocaleDateString('en-GB')}</td>
+                      <td>{fmt(tx.purchase_price, cs)}</td>
+                      <td>{Number(tx.units) % 1 === 0 ? Number(tx.units) : Number(tx.units).toFixed(2)}</td>
+                      <td style={fullySold ? { color: 'var(--text2)' } : undefined}>{Number(remaining) % 1 === 0 ? Number(remaining) : Number(remaining).toFixed(2)}{fullySold ? ' (sold)' : ''}</td>
+                      <td>{fmt(tx.cost_basis, cs)}</td>
+                      <td>{fmt(tx.current_price, cs)}</td>
+                      <td>{fmt(tx.current_value, cs)}</td>
+                      <td className={tx.pnl >= 0 ? 'positive' : 'negative'}>{fmt(tx.pnl, cs)}</td>
+                      <td className={tx.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.simple_roi)}</td>
+                      <td className={tx.annualised_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.annualised_roi)}</td>
+                      <td><RiskBadge level={tx.risk_level} /></td>
+                      <td style={{ color: 'var(--text2)' }}>{tx.holding_days}d</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {!fullySold && (
+                            <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: 11, color: 'var(--green)', borderColor: 'var(--green)' }} onClick={() => openSell(tx)}>Sell</button>
+                          )}
+                          <button className="btn-ghost" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => openEdit(tx)}>Edit</button>
+                          <button className="btn-danger" onClick={() => remove(tx.id)}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        )}
-      </div>
+        ))
+      )}
 
       {showForm && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowForm(false)}>
@@ -346,7 +358,7 @@ export default function TransactionsPage() {
                 </button>
                 {livePrice && !livePrice.error && (
                   <span style={{ fontSize: 13, color: 'var(--green)' }}>
-                    Live: {livePrice.currency} {livePrice.price?.toFixed(4)} {livePrice.stale ? '(cached)' : ''}
+                    Live: {livePrice.currency} {livePrice.price?.toFixed(2)} {livePrice.stale ? '(cached)' : ''}
                   </span>
                 )}
                 {livePrice?.error && <span style={{ fontSize: 13, color: 'var(--red)' }}>Price unavailable — use manual override</span>}

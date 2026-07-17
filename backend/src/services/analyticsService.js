@@ -109,11 +109,14 @@ function aggregateByPlatform(enrichedTxs) {
 function aggregateByShare(enrichedTxs) {
   const groups = {};
   for (const tx of enrichedTxs) {
-    const key = tx.ticker;
+    // Key on platform + ticker so the same share held on two platforms shows in both sections
+    const key = `${tx.platform_id}:${tx.ticker}`;
     if (!groups[key]) {
       groups[key] = {
         ticker: tx.ticker,
         share_name: tx.share_name,
+        platform_id: tx.platform_id,
+        platform_name: tx.platform_name,
         exchange: tx.exchange,
         risk_level: tx.risk_level,
         currency: tx.currency || 'USD',

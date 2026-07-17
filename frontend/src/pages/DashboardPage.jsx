@@ -35,7 +35,7 @@ function NavUpdateModal({ onClose, onSaved }) {
     priceApi.thaiMF().then(rows => {
       setFunds(rows);
       const init = {};
-      rows.forEach(r => { init[r.ticker] = r.current_nav ? String(parseFloat(r.current_nav).toFixed(4)) : ''; });
+      rows.forEach(r => { init[r.ticker] = r.current_nav ? String(parseFloat(r.current_nav).toFixed(2)) : ''; });
       setNavInputs(init);
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -78,7 +78,7 @@ function NavUpdateModal({ onClose, onSaved }) {
                   <td style={{ fontFamily: 'monospace', fontWeight: 600 }}>{f.ticker}</td>
                   <td style={{ fontSize: 12, maxWidth: 160 }}>{f.share_name}</td>
                   <td style={{ color: 'var(--text2)', fontSize: 12 }}>
-                    {f.current_nav ? `฿${parseFloat(f.current_nav).toFixed(4)}` : '—'}
+                    {f.current_nav ? `฿${parseFloat(f.current_nav).toFixed(2)}` : '—'}
                     {f.nav_updated_at && <span style={{ display: 'block', fontSize: 10, color: 'var(--text2)' }}>{new Date(f.nav_updated_at).toLocaleDateString('en-GB')}</span>}
                   </td>
                   <td>
@@ -278,42 +278,62 @@ export default function DashboardPage() {
             </table>
           </div>
 
-          {/* Holdings — each row shows its own currency */}
-          <div className="card">
-            <div style={{ fontWeight: 600, marginBottom: 16 }}>Holdings</div>
-            <div style={{ overflowX: 'auto' }}>
-              <table>
-                <thead>
-                  <tr><th>Type</th><th>Ticker</th><th>Name</th><th>Ccy</th><th>Units</th><th>Bought At</th><th>Live Price</th><th>Invested</th><th>Value</th><th>P&L</th><th>ROI</th><th>Ann. ROI</th><th>Risk</th></tr>
-                </thead>
-                <tbody>
-                  {summary.by_share.sort((a,b) => b.current_value - a.current_value).map(s => {
-                    const c = s.currency || 'USD';
-                    const units = Number(s.units);
-                    return (
-                      <tr key={s.ticker}>
-                        <td style={{ fontSize: 11, color: 'var(--text2)' }}>{s.asset_type || 'Stock'}</td>
-                        <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{s.ticker}</td>
-                        <td>{s.share_name}</td>
-                        <td>
-                          <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--primary)' }}>{sym(c)}{c}</span>
-                        </td>
-                        <td>{units.toFixed(units % 1 === 0 ? 0 : 4)}</td>
-                        <td>{fmt(s.cost_basis / units, c)}</td>
-                        <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{fmt(s.current_value / units, c)}</td>
-                        <td>{fmt(s.cost_basis, c)}</td>
-                        <td>{fmt(s.current_value, c)}</td>
-                        <td className={s.pnl >= 0 ? 'positive' : 'negative'}>{fmt(s.pnl, c)}</td>
-                        <td className={s.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(s.simple_roi)}</td>
-                        <td className={s.annualised_roi >= 0 ? 'positive' : 'negative'} title={`Based on ${s.holding_days}d held`}>{fmtPct(s.annualised_roi)}</td>
-                        <td><RiskBadge level={s.risk_level} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {/* Holdings — one section per platform (e.g. Thailand Investments, Trading 212) */}
+          {Object.entries(
+            summary.by_share.reduce((acc, s) => {
+              const p = s.platform_name || 'Other';
+              (acc[p] = acc[p] || []).push(s);
+              return acc;
+            }, {})
+          ).sort(([a], [b]) => a.localeCompare(b)).map(([platformName, shares]) => {
+            const secCurrency = shares[0]?.currency || 'USD';
+            const secInvested = shares.reduce((s, x) => s + x.cost_basis, 0);
+            const secValue = shares.reduce((s, x) => s + x.current_value, 0);
+            const secPnl = secValue - secInvested;
+            return (
+              <div className="card" key={platformName}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{platformName}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                    {shares.length} holding{shares.length === 1 ? '' : 's'} · Value {fmt(secValue, secCurrency)} ·{' '}
+                    <span className={secPnl >= 0 ? 'positive' : 'negative'}>P&L {fmt(secPnl, secCurrency)}</span>
+                  </div>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr><th>Type</th><th>Ticker</th><th>Name</th><th>Ccy</th><th>Units</th><th>Bought At</th><th>Live Price</th><th>Invested</th><th>Value</th><th>P&L</th><th>ROI</th><th>Ann. ROI</th><th>Risk</th></tr>
+                    </thead>
+                    <tbody>
+                      {[...shares].sort((a, b) => b.current_value - a.current_value).map(s => {
+                        const c = s.currency || 'USD';
+                        const units = Number(s.units);
+                        return (
+                          <tr key={s.ticker}>
+                            <td style={{ fontSize: 11, color: 'var(--text2)' }}>{s.asset_type || 'Stock'}</td>
+                            <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{s.ticker}</td>
+                            <td>{s.share_name}</td>
+                            <td>
+                              <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--primary)' }}>{sym(c)}{c}</span>
+                            </td>
+                            <td>{units.toFixed(units % 1 === 0 ? 0 : 2)}</td>
+                            <td>{fmt(s.cost_basis / units, c)}</td>
+                            <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{fmt(s.current_value / units, c)}</td>
+                            <td>{fmt(s.cost_basis, c)}</td>
+                            <td>{fmt(s.current_value, c)}</td>
+                            <td className={s.pnl >= 0 ? 'positive' : 'negative'}>{fmt(s.pnl, c)}</td>
+                            <td className={s.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(s.simple_roi)}</td>
+                            <td className={s.annualised_roi >= 0 ? 'positive' : 'negative'} title={`Based on ${s.holding_days}d held`}>{fmtPct(s.annualised_roi)}</td>
+                            <td><RiskBadge level={s.risk_level} /></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
 
           {/* Realized Sales — positions (or partial lots) already closed out */}
           {realized?.by_share?.length > 0 && (
@@ -331,7 +351,7 @@ export default function DashboardPage() {
                         <tr key={s.ticker}>
                           <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>{s.ticker}</td>
                           <td>{s.share_name}</td>
-                          <td>{Number(s.units_sold).toFixed(Number(s.units_sold) % 1 === 0 ? 0 : 4)}</td>
+                          <td>{Number(s.units_sold).toFixed(Number(s.units_sold) % 1 === 0 ? 0 : 2)}</td>
                           <td>{fmt(s.cost_basis, c)}</td>
                           <td>{fmt(s.proceeds, c)}</td>
                           <td className={s.pnl >= 0 ? 'positive' : 'negative'}>{fmt(s.pnl, c)}</td>
