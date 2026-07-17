@@ -7,6 +7,7 @@ const nav = [
   { to: '/transactions', label: 'Transactions', icon: '⊟' },
   { to: '/platforms', label: 'Platforms', icon: '⊞' },
   { to: '/risk', label: 'Risk Analysis', icon: '⚠' },
+  { to: '/monthly-returns', label: 'Monthly Returns', icon: '📅' },
 ];
 
 export default function Layout() {

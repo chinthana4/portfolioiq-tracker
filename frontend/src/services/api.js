@@ -45,6 +45,11 @@ export const sales = {
   delete:  id  => api.delete(`/sales/${id}`),
 };
 
+export const returns = {
+  holdings:  () => api.get('/returns/holdings'),
+  portfolio: () => api.get('/returns/portfolio'),
+};
+
 export const prices = {
   live:    (ticker, exchange) => api.get('/prices/live', { params: { ticker, exchange } }),
   refresh: ()                 => api.post('/prices/refresh'),

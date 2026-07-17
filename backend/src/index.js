@@ -10,7 +10,9 @@ const platformRoutes    = require('./routes/platforms');
 const transactionRoutes = require('./routes/transactions');
 const salesRoutes       = require('./routes/sales');
 const priceRoutes       = require('./routes/prices');
+const returnsRoutes     = require('./routes/returns');
 const { refreshAllPrices } = require('./services/priceService');
+const { lockMonthEndPricesIfDue } = require('./services/monthlyReturnService');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +30,7 @@ app.use('/api/platforms',    platformRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/sales',        salesRoutes);
 app.use('/api/prices',       priceRoutes);
+app.use('/api/returns',      returnsRoutes);
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
@@ -51,6 +54,15 @@ async function start() {
   await refreshAllPrices(); // warm up on boot
   setInterval(refreshAllPrices, REFRESH_INTERVAL);
   console.log(`[price-refresh] Auto-refresh every ${REFRESH_INTERVAL / 60000} minutes`);
+
+  // Check once per hour whether today is the last calendar day of the month;
+  // if so and a ticker's close for this month isn't locked yet, lock it now.
+  const MONTH_LOCK_CHECK_INTERVAL = 60 * 60 * 1000;
+  const runMonthLockCheck = () => lockMonthEndPricesIfDue()
+    .then(r => { if (r.locked) console.log(`[month-lock] Locked ${r.locked} month-end prices for ${r.month_end_date}`); })
+    .catch(err => console.error('[month-lock] Error:', err.message));
+  await runMonthLockCheck();
+  setInterval(runMonthLockCheck, MONTH_LOCK_CHECK_INTERVAL);
 }
 
 start().catch(err => { console.error('Startup failed:', err); process.exit(1); });

@@ -83,6 +83,19 @@ async function initSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      -- Locked month-end closing prices. Once a (ticker, exchange, month_end_date) row
+      -- exists it is never updated or deleted by the app — only new months are appended.
+      CREATE TABLE IF NOT EXISTS monthly_prices (
+        id SERIAL PRIMARY KEY,
+        ticker TEXT NOT NULL,
+        exchange TEXT NOT NULL,
+        month_end_date DATE NOT NULL,
+        price NUMERIC NOT NULL,
+        source TEXT,
+        locked_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(ticker, exchange, month_end_date)
+      );
+
       CREATE TABLE IF NOT EXISTS historical_valuations (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
