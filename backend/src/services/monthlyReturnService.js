@@ -44,12 +44,12 @@ async function lockMonthEndPricesIfDue() {
     if (existing.rows.length) continue;
 
     try {
-      const { price, source } = await fetchLivePrice(ticker, exchange);
+      const { price, currency, source } = await fetchLivePrice(ticker, exchange);
       await pool.query(
-        `INSERT INTO monthly_prices (ticker, exchange, month_end_date, price, source)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO monthly_prices (ticker, exchange, month_end_date, price, currency, source)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (ticker, exchange, month_end_date) DO NOTHING`,
-        [ticker, exchange, monthEndDate, price, source]
+        [ticker, exchange, monthEndDate, price, currency || 'USD', source]
       );
       locked++;
     } catch {

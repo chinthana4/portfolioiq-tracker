@@ -189,6 +189,34 @@ async function fetchLivePrice(ticker, exchange) {
   }
 }
 
+// ---- FX conversion ----
+// Yahoo FX ticker "XXX=X" returns how much of currency XXX one USD buys.
+const fxCache = new NodeCache({ stdTTL: 300 });
+
+async function usdRate(currency) {
+  if (currency === 'USD') return 1;
+  const cacheKey = `fx:${currency}`;
+  const cached = fxCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const response = await axios.get(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${currency}=X?interval=1d&range=1d`,
+    { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 }
+  );
+  const rate = response.data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+  if (!rate) throw new Error(`No FX rate for ${currency}`);
+  fxCache.set(cacheKey, rate);
+  return rate;
+}
+
+// Converts an amount from one currency to another via USD as the common basis.
+async function convertCurrency(amount, fromCurrency, toCurrency) {
+  if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) return amount;
+  const [fromPerUsd, toPerUsd] = await Promise.all([usdRate(fromCurrency), usdRate(toCurrency)]);
+  const amountInUsd = amount / fromPerUsd;
+  return amountInUsd * toPerUsd;
+}
+
 async function refreshAllPrices() {
   try {
     const result = await pool.query('SELECT DISTINCT ticker, exchange, asset_type FROM transactions');
@@ -201,4 +229,4 @@ async function refreshAllPrices() {
   }
 }
 
-module.exports = { fetchLivePrice, refreshAllPrices, THAI_MF_EXCHANGES };
+module.exports = { fetchLivePrice, refreshAllPrices, convertCurrency, THAI_MF_EXCHANGES };

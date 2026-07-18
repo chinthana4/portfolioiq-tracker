@@ -1,13 +1,25 @@
 const express = require('express');
 const { pool } = require('../db/schema');
 const { authenticate } = require('../middleware/auth');
-const { fetchLivePrice } = require('../services/priceService');
+const { fetchLivePrice, convertCurrency } = require('../services/priceService');
 const { enrichTransaction, aggregateByRisk, aggregateByPlatform, aggregateByShare } = require('../services/analyticsService');
 
 const router = express.Router();
 router.use(authenticate);
 
 const RISK_SCORE = { Low: 1, Medium: 2, High: 3, 'Very High': 4 };
+
+// Live prices come back in the quote's native currency (e.g. USD for a US stock),
+// but the transaction's cost basis is stored in its own currency (often GBP for
+// GBP-settled brokers). Convert before using the price for any P&L calculation.
+async function resolveCurrentPrice(tx) {
+  try {
+    const priceData = await fetchLivePrice(tx.ticker, tx.exchange);
+    return convertCurrency(priceData.price, priceData.currency, tx.currency);
+  } catch {
+    return tx.manual_price;
+  }
+}
 
 router.get('/', async (req, res) => {
   const { platform_id, risk_level, ticker } = req.query;
@@ -36,13 +48,8 @@ router.get('/', async (req, res) => {
     const remainingUnits = Number(tx.remaining_units);
     // Unrealized P&L should only reflect units still held, not units already sold.
     const calcTx = { ...tx, units: remainingUnits };
-    let result;
-    try {
-      const priceData = await fetchLivePrice(tx.ticker, tx.exchange);
-      result = enrichTransaction(calcTx, priceData.price);
-    } catch {
-      result = enrichTransaction(calcTx, tx.manual_price);
-    }
+    const price = await resolveCurrentPrice(tx);
+    const result = enrichTransaction(calcTx, price);
     return { ...result, units: originalUnits, remaining_units: remainingUnits };
   }));
 
@@ -64,13 +71,8 @@ router.get('/summary', async (req, res) => {
     const originalUnits = Number(tx.units);
     const remainingUnits = Number(tx.remaining_units);
     const calcTx = { ...tx, units: remainingUnits };
-    let result;
-    try {
-      const priceData = await fetchLivePrice(tx.ticker, tx.exchange);
-      result = enrichTransaction(calcTx, priceData.price);
-    } catch {
-      result = enrichTransaction(calcTx, tx.manual_price);
-    }
+    const price = await resolveCurrentPrice(tx);
+    const result = enrichTransaction(calcTx, price);
     return { ...result, units: originalUnits, remaining_units: remainingUnits };
   }));
 

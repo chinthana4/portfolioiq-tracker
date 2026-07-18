@@ -5,6 +5,11 @@ const {
   toMonthKey, buildMonthlyReturnSeries, computeAllWindows,
   modifiedDietzMonthlyReturn, chainDietzWindow, WINDOWS,
 } = require('../services/monthlyReturnService');
+const { convertCurrency } = require('../services/priceService');
+
+// Portfolio-level figures are reported in this single base currency so
+// GBP and THB (etc.) positions are never summed as raw numbers.
+const BASE_CURRENCY = 'GBP';
 
 const router = express.Router();
 router.use(authenticate);
@@ -25,10 +30,16 @@ router.get('/holdings', async (req, res) => {
   const result = [];
   for (const h of holdings.rows) {
     const priceRows = await pool.query(
-      `SELECT month_end_date, price FROM monthly_prices WHERE ticker = $1 AND exchange = $2 ORDER BY month_end_date ASC`,
+      `SELECT month_end_date, price, currency FROM monthly_prices WHERE ticker = $1 AND exchange = $2 ORDER BY month_end_date ASC`,
       [h.ticker, h.exchange]
     );
-    const series = buildMonthlyReturnSeries(priceRows.rows, Number(h.avg_buy_price), h.first_purchase_date);
+    // Locked prices are in the ticker's native quote currency; the holding's
+    // cost basis is in its own transaction currency — convert before comparing.
+    const convertedRows = await Promise.all(priceRows.rows.map(async row => ({
+      month_end_date: row.month_end_date,
+      price: await convertCurrency(Number(row.price), row.currency, h.currency),
+    })));
+    const series = buildMonthlyReturnSeries(convertedRows, Number(h.avg_buy_price), h.first_purchase_date);
     const windows = computeAllWindows(series, new Date(), toMonthKey(h.first_purchase_date));
 
     result.push({
@@ -58,11 +69,11 @@ router.get('/portfolio', async (req, res) => {
   `, [req.user.id]);
 
   const txs = (await pool.query(
-    `SELECT ticker, exchange, purchase_date, purchase_price, units FROM transactions WHERE user_id = $1`,
+    `SELECT ticker, exchange, currency, purchase_date, purchase_price, units FROM transactions WHERE user_id = $1`,
     [req.user.id]
   )).rows;
   const sales = (await pool.query(
-    `SELECT t.ticker, t.exchange, s.sale_date, s.sale_price, s.units_sold
+    `SELECT t.ticker, t.exchange, t.currency, s.sale_date, s.sale_price, s.units_sold
      FROM sales s JOIN transactions t ON t.id = s.transaction_id WHERE s.user_id = $1`,
     [req.user.id]
   )).rows;
@@ -75,12 +86,15 @@ router.get('/portfolio', async (req, res) => {
     return bought - sold;
   }
 
-  async function lockedPrice(ticker, exchange, monthEndDate) {
+  // Locked price is in the ticker's native quote currency — convert to the
+  // portfolio's reporting currency so THB/GBP/USD positions never get summed raw.
+  async function lockedPriceInBase(ticker, exchange, monthEndDate) {
     const r = await pool.query(
-      `SELECT price FROM monthly_prices WHERE ticker = $1 AND exchange = $2 AND month_end_date = $3`,
+      `SELECT price, currency FROM monthly_prices WHERE ticker = $1 AND exchange = $2 AND month_end_date = $3`,
       [ticker, exchange, monthEndDate]
     );
-    return r.rows.length ? Number(r.rows[0].price) : null;
+    if (!r.rows.length) return null;
+    return convertCurrency(Number(r.rows[0].price), r.rows[0].currency, BASE_CURRENCY);
   }
 
   const distinctPairs = [...new Set(txs.map(t => `${t.ticker}::${t.exchange}`))].map(k => {
@@ -106,7 +120,7 @@ router.get('/portfolio', async (req, res) => {
     for (const { ticker, exchange } of distinctPairs) {
       const units = unitsHeldAsOf(ticker, exchange, dateStr);
       if (units <= 0) continue;
-      const price = await lockedPrice(ticker, exchange, dateStr);
+      const price = await lockedPriceInBase(ticker, exchange, dateStr);
       if (price === null) { missingLock = true; break; }
       vEnd += units * price;
     }
@@ -117,12 +131,12 @@ router.get('/portfolio', async (req, res) => {
       continue;
     }
 
-    const flows = [
+    const flows = await Promise.all([
       ...txs.filter(t => t.purchase_date >= monthStart && t.purchase_date <= monthEndExclusive)
-        .map(t => ({ date: t.purchase_date, amount: Number(t.purchase_price) * Number(t.units) })),
+        .map(async t => ({ date: t.purchase_date, amount: await convertCurrency(Number(t.purchase_price) * Number(t.units), t.currency, BASE_CURRENCY) })),
       ...sales.filter(s => s.sale_date >= monthStart && s.sale_date <= monthEndExclusive)
-        .map(s => ({ date: s.sale_date, amount: -Number(s.sale_price) * Number(s.units_sold) })),
-    ];
+        .map(async s => ({ date: s.sale_date, amount: -(await convertCurrency(Number(s.sale_price) * Number(s.units_sold), s.currency, BASE_CURRENCY)) })),
+    ]);
 
     const vStart = prevValue ?? 0;
     const r = modifiedDietzMonthlyReturn(vStart, vEnd, flows, year, monthIndex0);
@@ -136,10 +150,12 @@ router.get('/portfolio', async (req, res) => {
   }
 
   // Flag instability when most capital was deposited very recently (last 30 days)
-  const totalCost = txs.reduce((s, t) => s + Number(t.purchase_price) * Number(t.units), 0);
-  const recentCost = txs
-    .filter(t => (Date.now() - new Date(t.purchase_date).getTime()) < 30 * 24 * 60 * 60 * 1000)
-    .reduce((s, t) => s + Number(t.purchase_price) * Number(t.units), 0);
+  const costsInBase = await Promise.all(txs.map(async t => ({
+    isRecent: (Date.now() - new Date(t.purchase_date).getTime()) < 30 * 24 * 60 * 60 * 1000,
+    amount: await convertCurrency(Number(t.purchase_price) * Number(t.units), t.currency, BASE_CURRENCY),
+  })));
+  const totalCost = costsInBase.reduce((s, c) => s + c.amount, 0);
+  const recentCost = costsInBase.filter(c => c.isRecent).reduce((s, c) => s + c.amount, 0);
   const recentCapitalWarning = totalCost > 0 && (recentCost / totalCost) > 0.5;
 
   res.json({ months: dietzMonths, windows, recent_capital_warning: recentCapitalWarning });

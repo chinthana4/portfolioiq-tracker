@@ -91,10 +91,12 @@ async function initSchema() {
         exchange TEXT NOT NULL,
         month_end_date DATE NOT NULL,
         price NUMERIC NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD',
         source TEXT,
         locked_at TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(ticker, exchange, month_end_date)
       );
+      ALTER TABLE monthly_prices ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD';
 
       CREATE TABLE IF NOT EXISTS historical_valuations (
         id SERIAL PRIMARY KEY,
