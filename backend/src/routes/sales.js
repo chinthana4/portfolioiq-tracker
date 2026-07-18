@@ -6,13 +6,22 @@ const { enrichSale, summarizeRealized } = require('../services/analyticsService'
 const router = express.Router();
 router.use(authenticate);
 
+// Share counts only need 1e-8 precision in practice; rounding here kills the
+// float64 noise (e.g. 3.2 - 10 + 10 landing on 3.1999999999999993 instead of 3.2)
+// that would otherwise persist forever once written to a NUMERIC column.
+function roundUnits(n) {
+  return Math.round(n * 1e8) / 1e8;
+}
+
 async function getRemainingUnits(client, transactionId) {
   const result = await client.query(
     `SELECT t.units - COALESCE((SELECT SUM(s.units_sold) FROM sales s WHERE s.transaction_id = t.id), 0) AS remaining
      FROM transactions t WHERE t.id = $1`,
     [transactionId]
   );
-  return result.rows.length ? Number(result.rows[0].remaining) : 0;
+  if (!result.rows.length) return 0;
+  const remaining = roundUnits(Number(result.rows[0].remaining));
+  return Math.abs(remaining) < 1e-6 ? 0 : remaining;
 }
 
 // List all realized sales for the user, newest first
@@ -66,7 +75,7 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: `No holdings found for ${ticker}` });
     }
 
-    let remaining = unitsToSell;
+    let remaining = roundUnits(unitsToSell);
     const createdSales = [];
 
     for (const lot of lotsResult.rows) {
@@ -74,7 +83,7 @@ router.post('/', async (req, res) => {
       const lotRemaining = await getRemainingUnits(client, lot.id);
       if (lotRemaining <= 0) continue;
 
-      const sellFromLot = Math.min(lotRemaining, remaining);
+      const sellFromLot = roundUnits(Math.min(lotRemaining, remaining));
       const proceeds = sellFromLot * price;
 
       const inserted = await client.query(`
@@ -84,10 +93,10 @@ router.post('/', async (req, res) => {
       `, [req.user.id, lot.id, sale_date, price, sellFromLot, proceeds, notes || null]);
 
       createdSales.push({ sale_id: inserted.rows[0].id, transaction_id: lot.id, units_sold: sellFromLot });
-      remaining -= sellFromLot;
+      remaining = roundUnits(remaining - sellFromLot);
     }
 
-    if (remaining > 0) {
+    if (remaining > 1e-6) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         error: `Cannot sell ${unitsToSell} units — only ${unitsToSell - remaining} units of ${ticker} are currently held`,

@@ -24,6 +24,27 @@ function fmtPct(n) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+// Annualising a short holding period compounds a single week/month's move into a
+// misleading yearly figure (e.g. +4% in 11 days -> "+250%/yr"). Suppress it entirely
+// under 30 days, and flag 30d-6mo as provisional rather than a reliable trend.
+function AnnRoiCell({ annualisedRoi, holdingDays }) {
+  if (holdingDays < 30) {
+    return <td style={{ color: 'var(--text2)', fontSize: 12 }} title={`Only ${holdingDays}d held — too short to annualise`}>n/a (&lt;1mo)</td>;
+  }
+  const provisional = holdingDays < 180;
+  return (
+    <td
+      className={annualisedRoi >= 0 ? 'positive' : 'negative'}
+      style={provisional ? { opacity: 0.6, fontStyle: 'italic' } : undefined}
+      title={provisional
+        ? `Provisional — only ${holdingDays}d held, don't extrapolate to a full year`
+        : `Based on ${holdingDays}d held`}
+    >
+      {fmtPct(annualisedRoi)}{provisional ? ' *' : ''}
+    </td>
+  );
+}
+
 function NavUpdateModal({ onClose, onSaved }) {
   const [funds, setFunds] = useState([]);
   const [navInputs, setNavInputs] = useState({});
@@ -323,7 +344,7 @@ export default function DashboardPage() {
                             <td>{fmt(s.current_value, c)}</td>
                             <td className={s.pnl >= 0 ? 'positive' : 'negative'}>{fmt(s.pnl, c)}</td>
                             <td className={s.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(s.simple_roi)}</td>
-                            <td className={s.annualised_roi >= 0 ? 'positive' : 'negative'} title={`Based on ${s.holding_days}d held`}>{fmtPct(s.annualised_roi)}</td>
+                            <AnnRoiCell annualisedRoi={s.annualised_roi} holdingDays={s.holding_days} />
                             <td><RiskBadge level={s.risk_level} /></td>
                           </tr>
                         );

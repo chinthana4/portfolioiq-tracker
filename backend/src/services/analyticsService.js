@@ -142,7 +142,7 @@ function aggregateByShare(enrichedTxs) {
     }
   }
   return Object.values(groups)
-    .filter(g => g.units > 0) // fully-sold positions have nothing left to show as a holding
+    .filter(g => g.units > 1e-6) // fully-sold positions (allowing for float noise) have nothing left to show
     .map(g => {
       const simpleROI = calcROI(g.cost_basis, g.current_value);
       const holdingDays = calcHoldingDays(g.earliest_purchase_date);

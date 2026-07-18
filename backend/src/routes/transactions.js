@@ -9,6 +9,12 @@ router.use(authenticate);
 
 const RISK_SCORE = { Low: 1, Medium: 2, High: 3, 'Very High': 4 };
 
+// Float64 subtraction of NUMERIC-derived values can leave a residue like 7e-16
+// instead of exactly 0 for a fully-sold lot; treat anything under this as zero.
+function clampUnits(n) {
+  return Math.abs(n) < 1e-6 ? 0 : n;
+}
+
 // Live prices come back in the quote's native currency (e.g. USD for a US stock),
 // but the transaction's cost basis is stored in its own currency (often GBP for
 // GBP-settled brokers). Convert before using the price for any P&L calculation.
@@ -45,7 +51,7 @@ router.get('/', async (req, res) => {
 
   const enriched = await Promise.all(txs.map(async (tx) => {
     const originalUnits = Number(tx.units);
-    const remainingUnits = Number(tx.remaining_units);
+    const remainingUnits = clampUnits(Number(tx.remaining_units));
     // Unrealized P&L should only reflect units still held, not units already sold.
     const calcTx = { ...tx, units: remainingUnits };
     const price = await resolveCurrentPrice(tx);
@@ -69,7 +75,7 @@ router.get('/summary', async (req, res) => {
 
   const enriched = await Promise.all(txs.map(async (tx) => {
     const originalUnits = Number(tx.units);
-    const remainingUnits = Number(tx.remaining_units);
+    const remainingUnits = clampUnits(Number(tx.remaining_units));
     const calcTx = { ...tx, units: remainingUnits };
     const price = await resolveCurrentPrice(tx);
     const result = enrichTransaction(calcTx, price);

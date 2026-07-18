@@ -26,6 +26,26 @@ function fmtPct(n) {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
+// Same reasoning as the Dashboard: annualising a short holding compounds a single
+// week/month's move into a misleading yearly figure, so suppress/flag it accordingly.
+function AnnRoiCell({ annualisedRoi, holdingDays }) {
+  if (holdingDays < 30) {
+    return <td style={{ color: 'var(--text2)', fontSize: 12 }} title={`Only ${holdingDays}d held — too short to annualise`}>n/a (&lt;1mo)</td>;
+  }
+  const provisional = holdingDays < 180;
+  return (
+    <td
+      className={annualisedRoi >= 0 ? 'positive' : 'negative'}
+      style={provisional ? { opacity: 0.6, fontStyle: 'italic' } : undefined}
+      title={provisional
+        ? `Provisional — only ${holdingDays}d held, don't extrapolate to a full year`
+        : `Based on ${holdingDays}d held`}
+    >
+      {fmtPct(annualisedRoi)}{provisional ? ' *' : ''}
+    </td>
+  );
+}
+
 const emptyForm = {
   asset_type: 'Stock',
   platform_id: '', share_name: '', ticker: '', exchange: 'NYSE',
@@ -245,7 +265,7 @@ export default function TransactionsPage() {
                       <td>{fmt(tx.current_value, cs)}</td>
                       <td className={tx.pnl >= 0 ? 'positive' : 'negative'}>{fmt(tx.pnl, cs)}</td>
                       <td className={tx.simple_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.simple_roi)}</td>
-                      <td className={tx.annualised_roi >= 0 ? 'positive' : 'negative'}>{fmtPct(tx.annualised_roi)}</td>
+                      <AnnRoiCell annualisedRoi={tx.annualised_roi} holdingDays={tx.holding_days} />
                       <td><RiskBadge level={tx.risk_level} /></td>
                       <td style={{ color: 'var(--text2)' }}>{tx.holding_days}d</td>
                       <td>
