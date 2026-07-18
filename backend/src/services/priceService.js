@@ -28,9 +28,15 @@ async function fetchFromYahoo(ticker, exchange) {
   });
   const result = response.data?.chart?.result?.[0];
   if (!result) throw new Error('No data from Yahoo Finance');
-  const price = result.meta?.regularMarketPrice;
-  const currency = result.meta?.currency || 'USD';
+  let price = result.meta?.regularMarketPrice;
+  let currency = result.meta?.currency || 'USD';
   if (!price) throw new Error('Price unavailable');
+  // LSE stocks are quoted in pence (GBp/GBX) — convert to pounds so it matches
+  // GBP-denominated cost basis and other GBP prices in the portfolio.
+  if (currency === 'GBp' || currency === 'GBX') {
+    price = price / 100;
+    currency = 'GBP';
+  }
   return { price, currency, source: 'yahoo' };
 }
 
@@ -40,11 +46,16 @@ async function fetchFromFinnhub(ticker, exchange) {
   const symbol = buildYahooTicker(ticker, exchange); // same suffix mapping works for Finnhub
   const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`;
   const response = await axios.get(url, { timeout: 8000 });
-  const { c: price, pc } = response.data; // c = current price, pc = previous close
+  let { c: price } = response.data; // c = current price
   if (!price || price === 0) throw new Error('Finnhub returned no price');
   // Finnhub doesn't return currency — derive from exchange
   const THB_EXCHANGES = ['SET', 'MAI'];
-  const currency = THB_EXCHANGES.includes(exchange?.toUpperCase()) ? 'THB' : 'USD';
+  let currency = THB_EXCHANGES.includes(exchange?.toUpperCase()) ? 'THB' : 'USD';
+  if (exchange?.toUpperCase() === 'LSE') {
+    // Finnhub returns LSE quotes in pence too — convert to pounds
+    price = price / 100;
+    currency = 'GBP';
+  }
   return { price, currency, source: 'finnhub' };
 }
 
