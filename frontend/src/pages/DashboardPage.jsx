@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { transactions as txApi, prices as priceApi, sales as salesApi } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { exportPortfolioToPPTX } from '../services/pptExport';
 import KPICard from '../components/KPICard';
 import RiskBadge from '../components/RiskBadge';
 
@@ -135,6 +136,7 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState('');
   const [showNavModal, setShowNavModal] = useState(false);
+  const [exportingPpt, setExportingPpt] = useState(false);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -189,6 +191,17 @@ export default function DashboardPage() {
   // dominant for charts (most value)
   const dominantCurrency = [...currencies].sort((a, b) => (byCurrency[b]?.value || 0) - (byCurrency[a]?.value || 0))[0] || 'USD';
 
+  const handleExportPpt = async () => {
+    setExportingPpt(true);
+    try {
+      await exportPortfolioToPPTX({ summary, realized, byCurrency, realizedByCurrency, currencies, dominantCurrency });
+    } catch (err) {
+      setError(`PowerPoint export failed: ${err.message || err}`);
+    } finally {
+      setExportingPpt(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
@@ -199,6 +212,15 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => setShowNavModal(true)}>
             ฿ Update Thai NAV
+          </button>
+          <button
+            className="btn-primary"
+            style={{ fontSize: 12, padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 6 }}
+            onClick={handleExportPpt}
+            disabled={exportingPpt || !summary || summary.transaction_count === 0}
+            title="Download a PowerPoint presentation of your current portfolio"
+          >
+            {exportingPpt ? <span className="spinner" style={{ width: 12, height: 12 }} /> : '📊'} Export to PPT
           </button>
           {lastUpdated && (
             <div style={{ fontSize: 11, color: 'var(--text2)', textAlign: 'right', lineHeight: 1.6 }}>
